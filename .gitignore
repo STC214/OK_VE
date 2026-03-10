@@ -1,0 +1,11 @@
+# Go build caches and local module cache
+OneKeyVE_GO/.gocache/
+OneKeyVE_GO/.gomodcache/
+OneKeyVE_GO/.tmp-go/
+
+# Built binaries
+OneKeyVE_GO/bin/
+
+# Large local artifacts that should not be versioned
+OneKeyVE_ALL/temp/
+OneKeyVE_ALL/ffmpeg.rar

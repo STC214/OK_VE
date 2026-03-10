@@ -1,0 +1,1666 @@
+{
+  "library_name": "vidgear",
+  "version": "0.3.4",
+  "modules": {
+    "vidgear.gears": {
+      "doc": null,
+      "functions": {
+        "get_module_version": {
+          "signature": "(module=None)",
+          "parameters": {
+            "module": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            }
+          },
+          "doc": "## get_module_version\n\nRetrieves version of specified module\n\nParameters:\n    name (ModuleType): module of datatype `ModuleType`.\n\n**Returns:** version of specified module as string"
+        },
+        "import_core_dependency": {
+          "signature": "(name, pkg_name=None, custom_message=None, version=None, mode='gte')",
+          "parameters": {
+            "name": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "pkg_name": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "custom_message": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "version": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "mode": {
+              "default": "gte",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            }
+          },
+          "doc": "## import_core_dependency\n\nImports specified core dependency. By default(`error = raise`), if a dependency is missing,\nan ImportError with a meaningful message will be raised. Also, If a dependency is present,\nbut version is different than specified, an error is raised.\n\nParameters:\n    name (string): name of dependency to be imported.\n    pkg_name (string): (Optional) package name of dependency(if different `pip` name). Otherwise `name` will be used.\n    custom_message (string): (Optional) custom Import error message to be raised.\n    version (string): (Optional) required minimum/maximum version of the dependency to be imported.\n    mode (boolean): (Optional) Possible values \"gte\"(greater then equal), \"lte\"(less then equal), \"exact\"(exact). Default is \"gte\".\n\n**Returns:** `None`"
+        }
+      },
+      "classes": {}
+    },
+    "vidgear.gears.camgear": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "CamGear": {
+          "doc": "CamGear supports a diverse range of video streams which can handle/control video stream almost any IP/USB Cameras, multimedia video file format (upto 4k tested),\nany network stream URL such as http(s), rtp, rtsp, rtmp, mms, etc. It also supports Gstreamer's RAW pipelines.\n\nCamGear API provides a flexible, high-level multi-threaded wrapper around OpenCV's VideoCapture API with direct access to almost all of its available parameters.\nIt relies on Threaded Queue mode for threaded, error-free and synchronized frame handling.\n\nCamGear internally implements `yt_dlp` backend class for seamlessly pipelining live video-frames and metadata from various streaming services like YouTube, Dailymotion,\nTwitch, and [many more ➶](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md#supported-sites)",
+          "methods": {
+            "__init__": {
+              "signature": "(self, source: Any = 0, stream_mode: bool = False, backend: int = 0, colorspace: str = None, logging: bool = False, time_delay: int = 0, **options: dict)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "source": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.Any"
+                },
+                "stream_mode": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "backend": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "colorspace": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "time_delay": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "options": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "<class 'dict'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the CamGear class.\n\nParameters:\n    source (based on input): defines the source for the input stream.\n    stream_mode (bool): controls the exclusive **Stream Mode** for handling streaming URLs.\n    backend (int): selects the backend for OpenCV's VideoCapture class.\n    colorspace (str): selects the colorspace of the input stream.\n    logging (bool): enables/disables logging.\n    time_delay (int): time delay (in sec) before start reading the frames.\n    options (dict): provides ability to alter Source Tweak Parameters."
+            },
+            "read": {
+              "signature": "(self) -> Optional[numpy.ndarray[tuple[Any, ...], numpy.dtype[~_ScalarT]]]",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Extracts frames synchronously from monitored queue, while maintaining a fixed-length frame buffer in the memory,\nand blocks the thread if the queue is full.\n\n**Returns:** A n-dimensional numpy array."
+            },
+            "start": {
+              "signature": "(self) -> ~T",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Launches the internal *Threaded Frames Extractor* daemon.\n\n**Returns:** A reference to the CamGear class object."
+            },
+            "stop": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Safely terminates the thread, and release the multi-threaded resources."
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.helper": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {
+        "capPropId": {
+          "signature": "(property: str, logging: bool = True) -> int",
+          "parameters": {
+            "property": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": true,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## capPropId\n\nRetrieves the OpenCV property's Integer(Actual) value from string.\n\nParameters:\n    property (string): inputs OpenCV property as string.\n    logging (bool): enables logging for its operations\n\n**Returns:** Resultant integer value."
+        },
+        "check_CV_version": {
+          "signature": "() -> int",
+          "parameters": {},
+          "doc": "## check_CV_version\n\n**Returns:** OpenCV's version first bit"
+        },
+        "check_WriteAccess": {
+          "signature": "(path: str, is_windows: bool = False, logging: bool = False) -> bool",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "is_windows": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## check_WriteAccess\n\nChecks whether given path directory has Write-Access.\n\nParameters:\n    path (string): absolute path of directory\n    is_windows (boolean): is running on Windows OS?\n    logging (bool): enables logging for its operations\n\n**Returns:** A boolean value, confirming whether Write-Access available, or not?."
+        },
+        "check_gstreamer_support": {
+          "signature": "(logging: bool = False) -> bool",
+          "parameters": {
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## check_gstreamer_support\n\nChecks whether OpenCV is compiled with Gstreamer(`>=1.0.0`) support.\n\nParameters:\n    logging (bool): enables logging for its operations\n\n**Returns:** A Boolean value"
+        },
+        "check_open_port": {
+          "signature": "(address: str, port: int = 22) -> bool",
+          "parameters": {
+            "address": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "port": {
+              "default": 22,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'int'>"
+            }
+          },
+          "doc": "## check_open_port\n\nChecks whether specified port open at given IP address.\n\nParameters:\n    address (string): given IP address.\n    port (int): check if port is open at given address.\n\n**Returns:** A boolean value, confirming whether given port is open at given IP address."
+        },
+        "check_output": {
+          "signature": "(*args: Union[list, tuple], **kwargs: dict) -> bytes",
+          "parameters": {
+            "args": {
+              "default": null,
+              "kind": "VAR_POSITIONAL",
+              "annotation": "typing.Union[list, tuple]"
+            },
+            "kwargs": {
+              "default": null,
+              "kind": "VAR_KEYWORD",
+              "annotation": "<class 'dict'>"
+            }
+          },
+          "doc": "## check_output\n\nReturns stdin output from subprocess module"
+        },
+        "create_blank_frame": {
+          "signature": "(frame: numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]] = None, text: str = '', logging: bool = False) -> numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]",
+          "parameters": {
+            "frame": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]"
+            },
+            "text": {
+              "default": "",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## create_blank_frame\n\nCreate blank frames of given frame size with text\n\nParameters:\n    frame (numpy.ndarray): inputs numpy array(frame).\n    text (str): Text to be written on frame.\n**Returns:**  A reduced numpy ndarray array."
+        },
+        "delete_ext_safe": {
+          "signature": "(dir_path: str, extensions: list = [], logging: bool = False) -> None",
+          "parameters": {
+            "dir_path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "extensions": {
+              "default": "[]",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'list'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## delete_ext_safe\n\nSafely deletes files with given extensions at given path.\n\nParameters:\n    dir_path (string): path to the directory\n    extensions (list): list of extensions to be deleted\n    logging (bool): enables logging for its operations"
+        },
+        "delete_file_safe": {
+          "signature": "(file_path: str) -> None",
+          "parameters": {
+            "file_path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            }
+          },
+          "doc": "## delete_ext_safe\n\nSafely deletes files at given path.\n\nParameters:\n    file_path (string): path to the file"
+        },
+        "deprecated": {
+          "signature": "(parameter=None, message=None, stacklevel=2)",
+          "parameters": {
+            "parameter": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "message": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "stacklevel": {
+              "default": 2,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            }
+          },
+          "doc": "### deprecated\n\nDecorator to mark a parameter or function as deprecated.\n\nParameters:\n    parameter(str): Name of parameter to be deprecated.\n    message(str): Custom message to display in warning message.\n    stacklevel(int): Stack frames level."
+        },
+        "dict2Args": {
+          "signature": "(param_dict: dict) -> list",
+          "parameters": {
+            "param_dict": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'dict'>"
+            }
+          },
+          "doc": "## dict2Args\n\nConverts dictionary attributes to list(args)\n\nParameters:\n    param_dict (dict): Parameters dictionary\n\n**Returns:** Arguments list"
+        },
+        "dimensions_to_resolutions": {
+          "signature": "(value: List[str]) -> List[str]",
+          "parameters": {
+            "value": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "typing.List[str]"
+            }
+          },
+          "doc": "## dimensions_to_resolutions\n\nParameters:\n    value (list): list of dimensions (e.g. `640x360`)\n\n**Returns:** list of resolutions (e.g. `360p`)"
+        },
+        "download_ffmpeg_binaries": {
+          "signature": "(path: str, os_windows: bool = False, os_bit: str = '') -> str",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "os_windows": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            },
+            "os_bit": {
+              "default": "",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            }
+          },
+          "doc": "## download_ffmpeg_binaries\n\nGenerates FFmpeg Static Binaries for windows(if not available)\n\nParameters:\n    path (string): path for downloading custom FFmpeg executables\n    os_windows (boolean): is running on Windows OS?\n    os_bit (string): 32-bit or 64-bit OS?\n\n**Returns:** A valid FFmpeg executable path string."
+        },
+        "extract_time": {
+          "signature": "(value: str) -> int",
+          "parameters": {
+            "value": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            }
+          },
+          "doc": "## extract_time\n\nExtract time from give string value.\n\nParameters:\n    value (string): string value.\n\n**Returns:** Time _(in seconds)_ as integer."
+        },
+        "generate_auth_certificates": {
+          "signature": "(path: str, overwrite: bool = False, logging: bool = False) -> tuple",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "overwrite": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## generate_auth_certificates\n\nAuto-Generates, and Auto-validates CURVE ZMQ key-pairs for NetGear API's Secure Mode.\n\nParameters:\n    path (string): path for generating CURVE key-pairs\n    overwrite (boolean): overwrite existing key-pairs or not?\n    logging (bool): enables logging for its operations\n\n**Returns:** A valid CURVE key-pairs path as string."
+        },
+        "get_audio_bitrate": {
+          "signature": "(samplerate: int, channels: int, bit_depth: float) -> int",
+          "parameters": {
+            "samplerate": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'int'>"
+            },
+            "channels": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'int'>"
+            },
+            "bit_depth": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'float'>"
+            }
+          },
+          "doc": "## get_audio_bitrate\n\nCalculate optimum bitrate from audio samplerate, channels, bit-depth values\n\nParameters:\n    samplerate (int): audio samplerate value\n    channels (int): number of channels\n    bit_depth (float): audio bit depth value\n\n**Returns:** Audio bitrate _(in Kbps)_ as integer."
+        },
+        "get_module_version": {
+          "signature": "(module=None)",
+          "parameters": {
+            "module": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            }
+          },
+          "doc": "## get_module_version\n\nRetrieves version of specified module\n\nParameters:\n    name (ModuleType): module of datatype `ModuleType`.\n\n**Returns:** version of specified module as string"
+        },
+        "get_supported_demuxers": {
+          "signature": "(path: str) -> List[str]",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            }
+          },
+          "doc": "## get_supported_demuxers\n\nFind and returns FFmpeg's supported demuxers\n\nParameters:\n    path (string): absolute path of FFmpeg binaries\n\n**Returns:** List of supported demuxers."
+        },
+        "get_supported_pixfmts": {
+          "signature": "(path: str) -> List[str]",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            }
+          },
+          "doc": "## get_supported_pixfmts\n\nFind and returns all FFmpeg's supported pixel formats.\n\nParameters:\n    path (string): absolute path of FFmpeg binaries\n\n**Returns:** List of supported pixel formats."
+        },
+        "get_supported_resolution": {
+          "signature": "(value: str, logging=False) -> str",
+          "parameters": {
+            "value": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            }
+          },
+          "doc": "## get_supported_resolution\n\nParameters:\n    value (string): value to be validated\n    logging (bool): enables logging for its operations\n\n**Returns:** Valid stream resolution"
+        },
+        "get_supported_vencoders": {
+          "signature": "(path: str) -> List[str]",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            }
+          },
+          "doc": "## get_supported_vencoders\n\nFind and returns FFmpeg's supported video encoders\n\nParameters:\n    path (string): absolute path of FFmpeg binaries\n\n**Returns:** List of supported encoders."
+        },
+        "get_valid_ffmpeg_path": {
+          "signature": "(custom_ffmpeg: str = '', is_windows: bool = False, ffmpeg_download_path: str = '', logging: bool = False) -> Union[str, bool]",
+          "parameters": {
+            "custom_ffmpeg": {
+              "default": "",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "is_windows": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            },
+            "ffmpeg_download_path": {
+              "default": "",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## get_valid_ffmpeg_path\n\nValidate the given FFmpeg path/binaries, and returns a valid FFmpeg executable path.\n\nParameters:\n    custom_ffmpeg (string): path to custom FFmpeg executables\n    is_windows (boolean): is running on Windows OS?\n    ffmpeg_download_path (string): FFmpeg static binaries download location _(Windows only)_\n    logging (bool): enables logging for its operations\n\n**Returns:** A valid FFmpeg executable path string."
+        },
+        "get_video_bitrate": {
+          "signature": "(width: int, height: int, fps: float, bpp: float) -> int",
+          "parameters": {
+            "width": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'int'>"
+            },
+            "height": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'int'>"
+            },
+            "fps": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'float'>"
+            },
+            "bpp": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'float'>"
+            }
+          },
+          "doc": "## get_video_bitrate\n\nCalculate optimum Bitrate from resolution, framerate, bits-per-pixels values\n\nParameters:\n    width (int): video-width\n    height (int): video-height\n    fps (float): video-framerate\n    bpp (float): bit-per-pixels value\n\n**Returns:** Video bitrate _(in Kbps)_ as integer."
+        },
+        "import_dependency_safe": {
+          "signature": "(name, error='raise', pkg_name=None, min_version=None, custom_message=None)",
+          "parameters": {
+            "name": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "error": {
+              "default": "raise",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "pkg_name": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "min_version": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            },
+            "custom_message": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            }
+          },
+          "doc": "## import_dependency_safe\n\nImports specified dependency safely. By default(`error = raise`), if a dependency is missing,\nan ImportError with a meaningful message will be raised. Otherwise if `error = log` a warning\nwill be logged and on `error = silent` everything will be quit. But If a dependency is present,\nbut older than specified, an error is raised if specified.\n\nParameters:\n    name (string): name of dependency to be imported.\n    error (string): raise or Log or silence ImportError. Possible values are `\"raise\"`, `\"log\"` and `silent`. Default is `\"raise\"`.\n    pkg_name (string): (Optional) package name of dependency(if different `pip` name). Otherwise `name` will be used.\n    min_version (string): (Optional) required minimum version of the dependency to be imported.\n    custom_message (string): (Optional) custom Import error message to be raised or logged.\n\n**Returns:** The imported module, when found and the version is correct(if specified). Otherwise `None`."
+        },
+        "is_valid_url": {
+          "signature": "(path: str, url: str = None, logging: bool = False) -> bool",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "url": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## is_valid_url\n\nChecks URL validity by testing its scheme against\nFFmpeg's supported protocols\n\nParameters:\n    path (string): absolute path of FFmpeg binaries\n    url (string): URL to be validated\n    logging (bool): enables logging for its operations\n\n**Returns:** A boolean value, confirming whether tests passed, or not?."
+        },
+        "logcurr_vidgear_ver": {
+          "signature": "(logging=False)",
+          "parameters": {
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "any"
+            }
+          },
+          "doc": "## logcurr_vidgear_ver\n\nA auxiliary function to log current vidgear version for debugging.\n\nParameters:\n    logging (bool): enables logging for its operations"
+        },
+        "logger_handler": {
+          "signature": "()",
+          "parameters": {},
+          "doc": "## logger_handler\n\nReturns the logger handler\n\n**Returns:** A logger handler"
+        },
+        "mkdir_safe": {
+          "signature": "(dir_path: str, logging: bool = False) -> None",
+          "parameters": {
+            "dir_path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## mkdir_safe\n\nSafely creates directory at given path.\n\nParameters:\n    dir_path (string): path to the directory\n    logging (bool): enables logging for its operations"
+        },
+        "reducer": {
+          "signature": "(frame: numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]] = None, percentage: Union[int, float] = 0, interpolation: int = 4) -> numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]",
+          "parameters": {
+            "frame": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]"
+            },
+            "percentage": {
+              "default": 0,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "typing.Union[int, float]"
+            },
+            "interpolation": {
+              "default": 4,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'int'>"
+            }
+          },
+          "doc": "## reducer\n\nReduces frame size by given percentage\n\nParameters:\n    frame (numpy.ndarray): inputs numpy array(frame).\n    percentage (int/float): inputs size-reduction percentage.\n    interpolation (int): Change resize interpolation.\n\n**Returns:**  A reduced numpy ndarray array."
+        },
+        "retrieve_best_interpolation": {
+          "signature": "(interpolations: list) -> Optional[int]",
+          "parameters": {
+            "interpolations": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'list'>"
+            }
+          },
+          "doc": "## retrieve_best_interpolation\nRetrieves best interpolation for resizing\n\nParameters:\n    interpolations (list): list of interpolations as string.\n**Returns:**  Resultant integer value of found interpolation."
+        },
+        "validate_audio": {
+          "signature": "(path: str, source: Union[str, list] = None) -> str",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "source": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "typing.Union[str, list]"
+            }
+          },
+          "doc": "## validate_audio\n\nValidates audio by retrieving audio-bitrate from file.\n\nParameters:\n    path (string): absolute path of FFmpeg binaries\n    source (string/list): source to be validated.\n\n**Returns:** A string value, confirming whether audio is present, or not?."
+        },
+        "validate_auth_keys": {
+          "signature": "(path: str, extension: str) -> bool",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "extension": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            }
+          },
+          "doc": "## validate_auth_keys\n\nValidates, and also maintains generated ZMQ CURVE Key-pairs.\n\nParameters:\n    path (string): path of generated CURVE key-pairs\n    extension (string): type of key-pair to be validated\n\n**Returns:** A boolean value, confirming whether tests passed, or not?."
+        },
+        "validate_ffmpeg": {
+          "signature": "(path: str, logging: bool = False) -> bool",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## validate_ffmpeg\n\nValidate FFmeg Binaries. returns `True` if tests are passed.\n\nParameters:\n    path (string): absolute path of FFmpeg binaries\n    logging (bool): enables logging for its operations\n\n**Returns:** A boolean value, confirming whether tests passed, or not?."
+        },
+        "validate_video": {
+          "signature": "(path: str, video_path: str = None, logging: bool = False) -> Optional[dict]",
+          "parameters": {
+            "path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "video_path": {
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'str'>"
+            },
+            "logging": {
+              "default": false,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "<class 'bool'>"
+            }
+          },
+          "doc": "## validate_video\n\nValidates video by retrieving resolution/size and framerate from file.\n\nParameters:\n    path (string): absolute path of FFmpeg binaries\n    video_path (string): absolute path to Video.\n\n**Returns:** A dictionary of retieved Video resolution _(as tuple(width, height))_ and framerate _(as float)_."
+        }
+      },
+      "classes": {
+        "TimeoutHTTPAdapter": {
+          "doc": "A custom Transport Adapter with default timeouts",
+          "methods": {
+            "__init__": {
+              "signature": "(self, *args, **kwargs)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "args": {
+                  "default": null,
+                  "kind": "VAR_POSITIONAL",
+                  "annotation": "any"
+                },
+                "kwargs": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Initialize self.  See help(type(self)) for accurate signature."
+            },
+            "add_headers": {
+              "signature": "(self, request, **kwargs)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "request": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "kwargs": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Add any headers needed by the connection. As of v2.0 this does\nnothing by default, but is left for overriding by users that subclass\nthe :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\nThis should not be called from user code, and is only exposed for use\nwhen subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param request: The :class:`PreparedRequest <PreparedRequest>` to add headers to.\n:param kwargs: The keyword arguments from the call to send()."
+            },
+            "build_connection_pool_key_attributes": {
+              "signature": "(self, request, verify, cert=None)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "request": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "verify": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "cert": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Build the PoolKey attributes used by urllib3 to return a connection.\n\nThis looks at the PreparedRequest, the user-specified verify value,\nand the value of the cert parameter to determine what PoolKey values\nto use to select a connection from a given urllib3 Connection Pool.\n\nThe SSL related pool key arguments are not consistently set. As of\nthis writing, use the following to determine what keys may be in that\ndictionary:\n\n* If ``verify`` is ``True``, ``\"ssl_context\"`` will be set and will be the\n  default Requests SSL Context\n* If ``verify`` is ``False``, ``\"ssl_context\"`` will not be set but\n  ``\"cert_reqs\"`` will be set\n* If ``verify`` is a string, (i.e., it is a user-specified trust bundle)\n  ``\"ca_certs\"`` will be set if the string is not a directory recognized\n  by :py:func:`os.path.isdir`, otherwise ``\"ca_cert_dir\"`` will be\n  set.\n* If ``\"cert\"`` is specified, ``\"cert_file\"`` will always be set. If\n  ``\"cert\"`` is a tuple with a second item, ``\"key_file\"`` will also\n  be present\n\nTo override these settings, one may subclass this class, call this\nmethod and use the above logic to change parameters as desired. For\nexample, if one wishes to use a custom :py:class:`ssl.SSLContext` one\nmust both set ``\"ssl_context\"`` and based on what else they require,\nalter the other keys to ensure the desired behaviour.\n\n:param request:\n    The PreparedReqest being sent over the connection.\n:type request:\n    :class:`~requests.models.PreparedRequest`\n:param verify:\n    Either a boolean, in which case it controls whether\n    we verify the server's TLS certificate, or a string, in which case it\n    must be a path to a CA bundle to use.\n:param cert:\n    (optional) Any user-provided SSL certificate for client\n    authentication (a.k.a., mTLS). This may be a string (i.e., just\n    the path to a file which holds both certificate and key) or a\n    tuple of length 2 with the certificate file path and key file\n    path.\n:returns:\n    A tuple of two dictionaries. The first is the \"host parameters\"\n    portion of the Pool Key including scheme, hostname, and port. The\n    second is a dictionary of SSLContext related parameters."
+            },
+            "build_response": {
+              "signature": "(self, req, resp)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "req": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "resp": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Builds a :class:`Response <requests.Response>` object from a urllib3\nresponse. This should not be called from user code, and is only exposed\nfor use when subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`\n\n:param req: The :class:`PreparedRequest <PreparedRequest>` used to generate the response.\n:param resp: The urllib3 response object.\n:rtype: requests.Response"
+            },
+            "cert_verify": {
+              "signature": "(self, conn, url, verify, cert)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "conn": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "url": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "verify": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "cert": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Verify a SSL certificate. This method should not be called from user\ncode, and is only exposed for use when subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param conn: The urllib3 connection object associated with the cert.\n:param url: The requested URL.\n:param verify: Either a boolean, in which case it controls whether we verify\n    the server's TLS certificate, or a string, in which case it must be a path\n    to a CA bundle to use\n:param cert: The SSL certificate to verify."
+            },
+            "close": {
+              "signature": "(self)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Disposes of any internal state.\n\nCurrently, this closes the PoolManager and any active ProxyManager,\nwhich closes any pooled connections."
+            },
+            "get_connection": {
+              "signature": "(self, url, proxies=None)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "url": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "proxies": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "DEPRECATED: Users should move to `get_connection_with_tls_context`\nfor all subclasses of HTTPAdapter using Requests>=2.32.2.\n\nReturns a urllib3 connection for the given URL. This should not be\ncalled from user code, and is only exposed for use when subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param url: The URL to connect to.\n:param proxies: (optional) A Requests-style dictionary of proxies used on this request.\n:rtype: urllib3.ConnectionPool"
+            },
+            "get_connection_with_tls_context": {
+              "signature": "(self, request, verify, proxies=None, cert=None)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "request": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "verify": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "proxies": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "cert": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Returns a urllib3 connection for the given request and TLS settings.\nThis should not be called from user code, and is only exposed for use\nwhen subclassing the :class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param request:\n    The :class:`PreparedRequest <PreparedRequest>` object to be sent\n    over the connection.\n:param verify:\n    Either a boolean, in which case it controls whether we verify the\n    server's TLS certificate, or a string, in which case it must be a\n    path to a CA bundle to use.\n:param proxies:\n    (optional) The proxies dictionary to apply to the request.\n:param cert:\n    (optional) Any user-provided SSL certificate to be used for client\n    authentication (a.k.a., mTLS).\n:rtype:\n    urllib3.ConnectionPool"
+            },
+            "init_poolmanager": {
+              "signature": "(self, connections, maxsize, block=False, **pool_kwargs)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "connections": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "maxsize": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "block": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "pool_kwargs": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Initializes a urllib3 PoolManager.\n\nThis method should not be called from user code, and is only\nexposed for use when subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param connections: The number of urllib3 connection pools to cache.\n:param maxsize: The maximum number of connections to save in the pool.\n:param block: Block when no free connections are available.\n:param pool_kwargs: Extra keyword arguments used to initialize the Pool Manager."
+            },
+            "proxy_headers": {
+              "signature": "(self, proxy)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "proxy": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Returns a dictionary of the headers to add to any request sent\nthrough a proxy. This works with urllib3 magic to ensure that they are\ncorrectly sent to the proxy, rather than in a tunnelled request if\nCONNECT is being used.\n\nThis should not be called from user code, and is only exposed for use\nwhen subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param proxy: The url of the proxy being used for this request.\n:rtype: dict"
+            },
+            "proxy_manager_for": {
+              "signature": "(self, proxy, **proxy_kwargs)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "proxy": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "proxy_kwargs": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Return urllib3 ProxyManager for the given proxy.\n\nThis method should not be called from user code, and is only\nexposed for use when subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param proxy: The proxy to return a urllib3 ProxyManager for.\n:param proxy_kwargs: Extra keyword arguments used to configure the Proxy Manager.\n:returns: ProxyManager\n:rtype: urllib3.ProxyManager"
+            },
+            "request_url": {
+              "signature": "(self, request, proxies)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "request": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "proxies": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Obtain the url to use when making the final request.\n\nIf the message is being sent through a HTTP proxy, the full URL has to\nbe used. Otherwise, we should only use the path portion of the URL.\n\nThis should not be called from user code, and is only exposed for use\nwhen subclassing the\n:class:`HTTPAdapter <requests.adapters.HTTPAdapter>`.\n\n:param request: The :class:`PreparedRequest <PreparedRequest>` being sent.\n:param proxies: A dictionary of schemes or schemes and hosts to proxy URLs.\n:rtype: str"
+            },
+            "send": {
+              "signature": "(self, request, **kwargs)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "request": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "kwargs": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Sends PreparedRequest object. Returns Response object.\n\n:param request: The :class:`PreparedRequest <PreparedRequest>` being sent.\n:param stream: (optional) Whether to stream the request content.\n:param timeout: (optional) How long to wait for the server to send\n    data before giving up, as a float, or a :ref:`(connect timeout,\n    read timeout) <timeouts>` tuple.\n:type timeout: float or tuple or urllib3 Timeout object\n:param verify: (optional) Either a boolean, in which case it controls whether\n    we verify the server's TLS certificate, or a string, in which case it\n    must be a path to a CA bundle to use\n:param cert: (optional) Any user-provided SSL certificate to be trusted.\n:param proxies: (optional) The proxies dictionary to apply to the request.\n:rtype: requests.Response"
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.netgear": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "NetGear": {
+          "doc": "NetGear is exclusively designed to transfer video frames synchronously and asynchronously between interconnecting systems over the network in real-time.\n\nNetGear implements a high-level wrapper around PyZmQ python library that contains python bindings for ZeroMQ - a high-performance asynchronous distributed messaging library\nthat provides a message queue, but unlike message-oriented middleware, its system can run without a dedicated message broker.\n\nNetGear also supports real-time Frame Compression capabilities for optimizing performance while sending the frames directly over the network, by encoding the frame before sending\nit and decoding it on the client's end automatically in real-time.\n\n!!! info\n    NetGear API now internally implements robust *Lazy Pirate pattern* (auto-reconnection) for its synchronous messaging patterns _(i.e. `zmq.PAIR` & `zmq.REQ/zmq.REP`)_\n    at both Server and Client ends, where its API instead of doing a blocking receive, will:\n\n    * Poll the socket and receive from it only when it's sure a reply has arrived.\n    * Attempt to reconnect, if no reply has arrived within a timeout period.\n    * Abandon the connection if there is still no reply after several requests.\n\nNetGear as of now seamlessly supports three ZeroMQ messaging patterns:\n\n- `zmq.PAIR` _(ZMQ Pair Pattern)_\n- `zmq.REQ/zmq.REP` _(ZMQ Request/Reply Pattern)_\n- `zmq.PUB/zmq.SUB` _(ZMQ Publish/Subscribe Pattern)_\n\n_whereas the supported protocol are: `tcp` and `ipc`_.\n\n??? tip \"Modes of Operation\"\n\n    * **Primary Modes**\n\n        NetGear API primarily has two modes of operations:\n\n        * **Send Mode:** _which employs `send()` function to send video frames over the network in real-time._\n\n        * **Receive Mode:** _which employs `recv()` function to receive frames, sent over the network with *Send Mode* in real-time. The mode sends back confirmation when the\n        frame is received successfully in few patterns._\n\n    * **Exclusive Modes**\n\n        In addition to these primary modes, NetGear API offers applications-specific Exclusive Modes:\n\n        * **Multi-Servers Mode:** _In this exclusive mode, NetGear API robustly **handles multiple servers at once**, thereby providing seamless access to frames and unidirectional\n        data transfer from multiple Servers/Publishers across the network in real-time._\n\n        * **Multi-Clients Mode:** _In this exclusive mode, NetGear API robustly **handles multiple clients at once**, thereby providing seamless access to frames and unidirectional\n        data transfer to multiple Client/Consumers across the network in real-time._\n\n        * **Bidirectional Mode:** _This exclusive mode **provides seamless support for bidirectional data transmission between between Server and Client along with video frames**._\n\n        * **Secure Mode:** _In this exclusive mode, NetGear API **provides easy access to powerful, smart & secure ZeroMQ's Security Layers** that enables strong encryption on\n        data, and unbreakable authentication between the Server and Client with the help of custom certificates/keys that brings cheap, standardized privacy and authentication\n        for distributed systems over the network._",
+          "methods": {
+            "__init__": {
+              "signature": "(self, address: str = None, port: str = None, protocol: str = None, pattern: int = 0, receive_mode: bool = False, logging: bool = False, **options: dict)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "address": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "port": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "protocol": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "pattern": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "receive_mode": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "options": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "<class 'dict'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the NetGear class.\n\nParameters:\n    address (str): sets the valid network address of the Server/Client.\n    port (str): sets the valid Network Port of the Server/Client.\n    protocol (str): sets the valid messaging protocol between Server/Client.\n    pattern (int): sets the supported messaging pattern(flow of communication) between Server/Client\n    receive_mode (bool): select the Netgear's Mode of operation.\n    logging (bool): enables/disables logging.\n    options (dict): provides the flexibility to alter various NetGear internal properties."
+            },
+            "close": {
+              "signature": "(self, kill: bool = False) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "kill": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                }
+              },
+              "doc": "Safely terminates the threads, and NetGear resources.\n\nParameters:\n    kill (bool): Kills ZMQ context instead of graceful exiting in receive mode."
+            },
+            "recv": {
+              "signature": "(self, return_data=None) -> Optional[numpy.ndarray[tuple[Any, ...], numpy.dtype[~_ScalarT]]]",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "return_data": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "A Receiver end method, that extracts received frames synchronously from monitored deque, while maintaining a\nfixed-length frame buffer in the memory, and blocks the thread if the deque is full.\n\nParameters:\n    return_data (any): inputs return data _(of any datatype)_, for sending back to Server.\n\n**Returns:** A n-dimensional numpy array."
+            },
+            "send": {
+              "signature": "(self, frame: numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]], message: Any = None) -> Optional[Any]",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "frame": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]"
+                },
+                "message": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.Any"
+                }
+              },
+              "doc": "A Server end method, that sends the data and frames over the network to Client(s).\n\nParameters:\n    frame (numpy.ndarray): inputs numpy array(frame).\n    message (any): input for sending additional data _(of any datatype except `numpy.ndarray`)_ to Client(s).\n\n**Returns:** Data _(of any datatype)_ in selected exclusive modes, otherwise None-type."
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.pigear": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "PiGear": {
+          "doc": "PiGear implements a seamless and robust wrapper around the [picamera2](https://github.com/raspberrypi/picamera2) python library, simplifying integration with minimal code changes and ensuring a\nsmooth transition for developers already familiar with the Picamera2 API. PiGear leverages the `libcamera` API under the hood with multi-threading, providing high-performance :fire:, enhanced\ncontrol and functionality for Raspberry Pi camera modules.\n\nPiGear handles common configuration parameters and non-standard settings for various camera types, simplifying the integration process. PiGear currently supports picamera2 API parameters such as\n`sensor`, `controls`, `transform`, and `stride`, with internal type and sanity checks for robust performance.\n\nWhile primarily focused on Raspberry Pi camera modules, PiGear also provides basic functionality for USB webcams only with Picamera2 API, along with the ability to accurately differentiate between\nUSB and Raspberry Pi cameras using metadata.\n\n???+ info \"Backward compatibility with `picamera` library\"\n    PiGear seamlessly switches to the legacy [picamera](https://picamera.readthedocs.io/en/release-1.13/index.html) library if the `picamera2` library is unavailable, ensuring seamless backward\n    compatibility. For this, PiGear also provides a flexible multi-threaded framework around complete `picamera` API, allowing developers to effortlessly exploit a wide range of parameters, such\n    as `brightness`, `saturation`, `sensor_mode`, `iso`, `exposure`, and more.\n\nFurthermore, PiGear supports the use of multiple camera modules, including those found on Raspberry Pi Compute Module IO boards and USB cameras _(only with Picamera2 API)_.\n\n??? new \"Threaded Internal Timer :material-camera-timer:\"\n    PiGear ensures proper resource release during the termination of the API, preventing potential issues or resource leaks. PiGear API internally implements a\n    ==Threaded Internal Timer== that silently keeps active track of any frozen-threads or hardware-failures and exits safely if any do occur. This means that if\n    you're running the PiGear API in your script and someone accidentally pulls the Camera-Module cable out, instead of going into a possible kernel panic,\n    the API will exit safely to save resources.\n\n!!! failure \"Make sure to [enable Raspberry Pi hardware-specific settings](https://picamera.readthedocs.io/en/release-1.13/quickstart.html) prior using this API, otherwise nothing will work.\"",
+          "methods": {
+            "__init__": {
+              "signature": "(self, camera_num: int = 0, resolution: Tuple[int, int] = (640, 480), framerate: Union[int, float] = 30, colorspace: str = None, logging: bool = False, time_delay: int = 0, **options: dict)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "camera_num": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "resolution": {
+                  "default": "(640, 480)",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.Tuple[int, int]"
+                },
+                "framerate": {
+                  "default": 30,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.Union[int, float]"
+                },
+                "colorspace": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "time_delay": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "options": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "<class 'dict'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the PiGear class.\n\nParameters:\n    camera_num (int): selects the camera module index which will be used as source.\n    resolution (tuple): sets the resolution (i.e. `(width,height)`) of the source..\n    framerate (int/float): sets the framerate of the source.\n    colorspace (str): selects the colorspace of the input stream.\n    logging (bool): enables/disables logging.\n    time_delay (int): time delay (in sec) before start reading the frames.\n    options (dict): provides ability to alter Source Tweak Parameters."
+            },
+            "read": {
+              "signature": "(self) -> numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Extracts frames synchronously from monitored deque, while maintaining a fixed-length frame buffer in the memory,\nand blocks the thread if the deque is full.\n\n**Returns:** A n-dimensional numpy array."
+            },
+            "start": {
+              "signature": "(self) -> ~PIGear",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Launches the internal *Threaded Frames Extractor* daemon\n\n**Returns:** A reference to the PiGear class object."
+            },
+            "stop": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Safely terminates the thread, and release the multi-threaded resources."
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.screengear": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "ScreenGear": {
+          "doc": "ScreenGear is designed exclusively for targeting rapid Screencasting Capabilities, which means it can\ngrab frames from your monitor in real-time, either by defining an area on the computer screen or full-screen,\nat the expense of inconsiderable latency. ScreenGear also seamlessly support frame capturing from multiple\nmonitors as well as supports multiple backends.\n\nScreenGear API implements a multi-threaded wrapper around dxcam, pyscreenshot, python-mss python library,\nand also flexibly supports its internal parameter.",
+          "methods": {
+            "__init__": {
+              "signature": "(self, monitor: int = None, backend: str = None, colorspace: str = None, logging: bool = False, **options: dict)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "monitor": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "backend": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "colorspace": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "options": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "<class 'dict'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the ScreenGear class.\n\nParameters:\n    monitor (int): enables `mss` backend and sets the index of the monitor screen.\n    backend (str): select suitable backend for extracting frames.\n    colorspace (str): selects the colorspace of the input stream.\n    logging (bool): enables/disables logging.\n    options (dict): provides the flexibility to easily alter backend library parameters. Such as, manually set the dimensions of capture screen area etc."
+            },
+            "read": {
+              "signature": "(self) -> numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Extracts frames synchronously from monitored deque, while maintaining a fixed-length frame buffer in the memory,\nand blocks the thread if the deque is full.\n\n**Returns:** A n-dimensional numpy array."
+            },
+            "start": {
+              "signature": "(self) -> ~T",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Launches the internal *Threaded Frames Extractor* daemon\n\n**Returns:** A reference to the ScreenGear class object."
+            },
+            "stop": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Safely terminates the thread, and release the resources."
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.stabilizer": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "Stabilizer": {
+          "doc": "This is an auxiliary class that enables Video Stabilization for vidgear with minimalistic latency, and at the expense\nof little to no additional computational requirements.\n\nThe basic idea behind it is to tracks and save the salient feature array for the given number of frames and then uses\nthese anchor point to cancel out all perturbations relative to it for the incoming frames in the queue. This class relies\nheavily on **Threaded Queue mode** for error-free & ultra-fast frame handling.",
+          "methods": {
+            "__init__": {
+              "signature": "(self, smoothing_radius: int = 25, border_type: str = 'black', border_size: int = 0, crop_n_zoom: bool = False, logging: bool = False)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "smoothing_radius": {
+                  "default": 25,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "border_type": {
+                  "default": "black",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "border_size": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "crop_n_zoom": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the Stabilizer class.\n\nParameters:\n    smoothing_radius (int): alter averaging window size.\n    border_type (str): changes the extended border type.\n    border_size (int): enables and set the value for extended border size to reduce the black borders.\n    crop_n_zoom (bool): enables cropping and zooming of frames(to original size) to reduce the black borders.\n    logging (bool): enables/disables logging."
+            },
+            "clean": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Cleans Stabilizer resources"
+            },
+            "stabilize": {
+              "signature": "(self, frame: numpy.ndarray) -> Optional[numpy.ndarray]",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "frame": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'numpy.ndarray'>"
+                }
+              },
+              "doc": "This method takes an unstabilized video frame, and returns a stabilized one.\n\nParameters:\n    frame (numpy.ndarray): inputs unstabilized video frames."
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.streamgear": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "StreamGear": {
+          "doc": "StreamGear automates transcoding workflow for generating Ultra-Low Latency, High-Quality, Dynamic & Adaptive Streaming Formats (such as MPEG-DASH and HLS) in just few lines of python code.\nStreamGear provides a standalone, highly extensible, and flexible wrapper around FFmpeg multimedia framework for generating chunked-encoded media segments of the content.\n\nSteamGear easily transcodes source videos/audio files & real-time video-frames and breaks them into a sequence of multiple smaller chunks/segments of suitable length. These segments make it\npossible to stream videos at different quality levels _(different bitrate or spatial resolutions)_ and can be switched in the middle of a video from one quality level to another - if bandwidth\npermits - on a per-segment basis. A user can serve these segments on a web server that makes it easier to download them through HTTP standard-compliant GET requests.\n\nSteamGear also creates a Manifest/Playlist file (such as MPD in-case of DASH and M3U8 in-case of HLS) besides segments that describe these segment information\n(timing, URL, media characteristics like video resolution and bit rates) and is provided to the client before the streaming session.\n\nSteamGear currently supports MPEG-DASH (Dynamic Adaptive Streaming over HTTP, ISO/IEC 23009-1) and Apple HLS (HTTP live streaming).",
+          "methods": {
+            "__init__": {
+              "signature": "(self, output: str = '', format: str = 'dash', custom_ffmpeg: str = '', logging: bool = False, **stream_params: dict)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "output": {
+                  "default": "",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "format": {
+                  "default": "dash",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "custom_ffmpeg": {
+                  "default": "",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "stream_params": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "<class 'dict'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the StreamGear class.\n\nParameters:\n    output (str): sets the valid filename/path for generating the StreamGear assets.\n    format (str): select the adaptive HTTP streaming format(DASH and HLS).\n    custom_ffmpeg (str): assigns the location of custom path/directory for custom FFmpeg executables.\n    logging (bool): enables/disables logging.\n    stream_params (dict): provides the flexibility to control supported internal parameters and FFmpeg properties."
+            },
+            "close": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Safely terminates various StreamGear process."
+            },
+            "stream": {
+              "signature": "(self, frame: numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]], rgb_mode: bool = False) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "frame": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]"
+                },
+                "rgb_mode": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                }
+              },
+              "doc": "Pipes `ndarray` frames to FFmpeg Pipeline for transcoding them into chunked-encoded media segments of\nstreaming formats such as MPEG-DASH and HLS.\n\n!!! warning \"[DEPRECATION NOTICE]: The `rgb_mode` parameter is deprecated and will be removed in a future version.\"\n\nParameters:\n    frame (ndarray): a valid numpy frame\n    rgb_mode (boolean): enable this flag to activate RGB mode _(i.e. specifies that incoming frames are of RGB format instead of default BGR)_."
+            },
+            "terminate": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "!!! warning \"[DEPRECATION NOTICE]: This method is now deprecated and will be removed in a future release.\"\n\nThis function ensures backward compatibility for the `terminate()` method to maintain the API on existing systems.\nIt achieves this by calling the new `close()` method to terminate various\nStreamGear processes."
+            },
+            "transcode_source": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Transcodes an entire video file _(with or without audio)_ into chunked-encoded media segments of\nstreaming formats such as MPEG-DASH and HLS."
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.videogear": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "VideoGear": {
+          "doc": "VideoGear API provides a special internal wrapper around VidGear's exclusive Video Stabilizer class.\nVideoGear also acts as a Common Video-Capture API that provides internal access for both CamGear and PiGear APIs and\ntheir parameters with an exclusive enablePiCamera boolean flag.\n\nVideoGear is ideal when you need to switch to different video sources without changing your code much. Also, it enables\neasy stabilization for various video-streams (real-time or not)\nwith minimum effort and writing way fewer lines of code.",
+          "methods": {
+            "__init__": {
+              "signature": "(self, enablePiCamera: bool = False, stabilize: bool = False, camera_num: int = 0, resolution: Tuple[int, int] = (640, 480), framerate: Union[int, float] = 30, source: Any = 0, stream_mode: bool = False, backend: int = 0, time_delay: int = 0, colorspace: str = None, logging: bool = False, **options: dict)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "enablePiCamera": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "stabilize": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "camera_num": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "resolution": {
+                  "default": "(640, 480)",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.Tuple[int, int]"
+                },
+                "framerate": {
+                  "default": 30,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.Union[int, float]"
+                },
+                "source": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.Any"
+                },
+                "stream_mode": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "backend": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "time_delay": {
+                  "default": 0,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'int'>"
+                },
+                "colorspace": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "options": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "<class 'dict'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the VideoGear class.\n\nParameters:\n    enablePiCamera (bool): provide access to PiGear(if True) or CamGear(if False) APIs respectively.\n    stabilize (bool): enable access to Stabilizer Class for stabilizing frames.\n    camera_num (int): selects the camera module index which will be used as Rpi source.\n    resolution (tuple): sets the resolution (i.e. `(width,height)`) of the Rpi source.\n    framerate (int/float): sets the framerate of the Rpi source.\n    source (based on input): defines the source for the input stream.\n    stream_mode (bool): controls the exclusive YouTube Mode.\n    backend (int): selects the backend for OpenCV's VideoCapture class.\n    colorspace (str): selects the colorspace of the input stream.\n    logging (bool): enables/disables logging.\n    time_delay (int): time delay (in sec) before start reading the frames.\n    options (dict): provides ability to alter Tweak Parameters of CamGear, PiGear & Stabilizer."
+            },
+            "read": {
+              "signature": "(self) -> numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Extracts frames synchronously from selected API's monitored deque, while maintaining a fixed-length frame\nbuffer in the memory, and blocks the thread if the deque is full.\n\n**Returns:** A n-dimensional numpy array."
+            },
+            "start": {
+              "signature": "(self) -> ~T",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Launches the internal *Threaded Frames Extractor* daemon of API in use.\n\n**Returns:** A reference to the selected class object."
+            },
+            "stop": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Safely terminates the thread, and release the respective multi-threaded resources."
+            }
+          }
+        }
+      }
+    },
+    "vidgear.gears.writegear": {
+      "doc": "===============================================\nvidgear library source-code is deployed under the Apache 2.0 License:\n\nCopyright (c) 2019 Abhishek Thakur(@abhiTronix) <abhi.una12@gmail.com>\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n   http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n===============================================",
+      "functions": {},
+      "classes": {
+        "WriteGear": {
+          "doc": "WriteGear handles various powerful Video-Writer Tools that provide us the freedom to do almost anything imaginable with multimedia data.\n\nWriteGear API provides a complete, flexible, and robust wrapper around FFmpeg, a leading multimedia framework. WriteGear can process real-time frames into a lossless\ncompressed video-file with any suitable specification (such as bitrate, codec, framerate, resolution, subtitles, etc.). It is powerful enough to perform complex tasks such as\nLive-Streaming (such as for Twitch) and Multiplexing Video-Audio with real-time frames in way fewer lines of code.\n\nBest of all, WriteGear grants users the complete freedom to play with any FFmpeg parameter with its exclusive Custom Commands function without relying on any\nthird-party API.\n\nIn addition to this, WriteGear also provides flexible access to OpenCV's VideoWriter API tools for video-frames encoding without compression.\n\n??? tip \"Modes of Operation\"\n\n    WriteGear primarily operates in following modes:\n\n    * **Compression Mode**: In this mode, WriteGear utilizes powerful **FFmpeg** inbuilt encoders to encode lossless multimedia files.\n                            This mode provides us the ability to exploit almost any parameter available within FFmpeg, effortlessly and flexibly,\n                            and while doing that it robustly handles all errors/warnings quietly.\n\n    * **Non-Compression Mode**: In this mode, WriteGear utilizes basic **OpenCV's inbuilt VideoWriter API** tools. This mode also supports all\n                                parameters manipulation available within VideoWriter API, but it lacks the ability to manipulate encoding parameters\n                                and other important features like video compression, audio encoding, etc.",
+          "methods": {
+            "__init__": {
+              "signature": "(self, output: str = '', compression_mode: bool = True, custom_ffmpeg: str = '', logging: bool = False, **output_params: dict)",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "output": {
+                  "default": "",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "compression_mode": {
+                  "default": true,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "custom_ffmpeg": {
+                  "default": "",
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'str'>"
+                },
+                "logging": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                },
+                "output_params": {
+                  "default": null,
+                  "kind": "VAR_KEYWORD",
+                  "annotation": "<class 'dict'>"
+                }
+              },
+              "doc": "This constructor method initializes the object state and attributes of the WriteGear class.\n\nParameters:\n    output (str): sets the valid filename/path/URL for encoding.\n    compression_mode (bool): selects the WriteGear's Primary Mode of Operation.\n    custom_ffmpeg (str): assigns the location of custom path/directory for custom FFmpeg executables.\n    logging (bool): enables/disables logging.\n    output_params (dict): provides the flexibility to control supported internal parameters and FFmpeg properties."
+            },
+            "close": {
+              "signature": "(self) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                }
+              },
+              "doc": "Safely terminates various WriteGear process."
+            },
+            "execute_ffmpeg_cmd": {
+              "signature": "(self, command: List = None) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "command": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "typing.List"
+                }
+              },
+              "doc": "Executes user-defined FFmpeg Terminal command, formatted as a python list(in Compression Mode only).\n\nParameters:\n    command (list): inputs list data-type command."
+            },
+            "write": {
+              "signature": "(self, frame: numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]], rgb_mode: bool = False) -> None",
+              "parameters": {
+                "self": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "any"
+                },
+                "frame": {
+                  "default": null,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "numpy.ndarray[tuple[typing.Any, ...], numpy.dtype[~_ScalarT]]"
+                },
+                "rgb_mode": {
+                  "default": false,
+                  "kind": "POSITIONAL_OR_KEYWORD",
+                  "annotation": "<class 'bool'>"
+                }
+              },
+              "doc": "Pipelines `ndarray` frames to respective API _(**FFmpeg** in Compression Mode & **OpenCV's VideoWriter API** in Non-Compression Mode)_.\n\nParameters:\n    frame (ndarray): a valid numpy frame\n    rgb_mode (boolean): enable this flag to activate RGB mode _(i.e. specifies that incoming frames are of RGB format(instead of default BGR)_."
+            }
+          }
+        }
+      }
+    }
+  }
+}
