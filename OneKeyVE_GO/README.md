@@ -2,7 +2,11 @@
 
 ## 项目说明
 
-`OneKeyVE_GO` 是独立于 Python 版本的 Go 子项目。
+`OneKeyVE_GO` 是仓库中的当前主实现。
+
+仓库级导航和目录说明见：
+
+- [根目录 README](/f:/Project/OneKey_VE/README.md)
 
 当前已经完成：
 
