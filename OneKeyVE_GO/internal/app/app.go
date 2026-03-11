@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -18,16 +19,21 @@ type Target struct {
 }
 
 type Config struct {
-	WorkDir     string
-	OutputDir   string
-	FFmpegPath  string
-	FFprobePath string
-	Encoder     string
-	BlurSigma   int
-	FeatherPx   int
-	Targets     []Target
-	OnLog       func(string)
-	OnProgress  func(ProgressUpdate)
+	WorkDir                string
+	OutputDir              string
+	FFmpegPath             string
+	FFprobePath            string
+	Encoder                string
+	BlackBorderMode        string
+	BlurSigma              int
+	FeatherPx              int
+	BlackLineThreshold     int
+	BlackLineRatioPercent  int
+	BlackLineRequiredRun   int
+	Targets                []Target
+	Controller             *RunController
+	OnLog                  func(string)
+	OnProgress             func(ProgressUpdate)
 }
 
 type ProgressUpdate struct {
@@ -43,10 +49,15 @@ type ProgressUpdate struct {
 
 func DefaultConfig(workdir string) Config {
 	return Config{
-		WorkDir:   workdir,
-		OutputDir: filepath.Join(workdir, "output"),
-		BlurSigma: 20,
-		FeatherPx: 30,
+		WorkDir:               workdir,
+		OutputDir:             filepath.Join(workdir, "output"),
+		Encoder:               "h264_nvenc",
+		BlackBorderMode:       ffmpeg.BlackBorderModeCenterCrop,
+		BlurSigma:             20,
+		FeatherPx:             30,
+		BlackLineThreshold:    6,
+		BlackLineRatioPercent: 60,
+		BlackLineRequiredRun:  2,
 		Targets: []Target{
 			{Label: "9x20", Ratio: 9.0 / 20.0},
 			{Label: "5x11", Ratio: 5.0 / 11.0},
@@ -84,11 +95,26 @@ func emitProgress(cfg Config, update ProgressUpdate) {
 }
 
 func Run(cfg Config) error {
+	if err := waitForControl(cfg); err != nil {
+		return err
+	}
 	if cfg.BlurSigma <= 0 {
 		return fmt.Errorf("blur must be positive")
 	}
 	if cfg.FeatherPx <= 0 {
 		return fmt.Errorf("feather must be positive")
+	}
+	if cfg.BlackLineThreshold < 0 || cfg.BlackLineThreshold > 255 {
+		return fmt.Errorf("black line threshold must be between 0 and 255")
+	}
+	if cfg.BlackBorderMode != ffmpeg.BlackBorderModeCenterCrop && cfg.BlackBorderMode != ffmpeg.BlackBorderModeLegacy {
+		return fmt.Errorf("black border mode must be %q or %q", ffmpeg.BlackBorderModeCenterCrop, ffmpeg.BlackBorderModeLegacy)
+	}
+	if cfg.BlackLineRatioPercent <= 0 || cfg.BlackLineRatioPercent > 100 {
+		return fmt.Errorf("black line ratio percent must be between 1 and 100")
+	}
+	if cfg.BlackLineRequiredRun <= 0 {
+		return fmt.Errorf("black line required run must be positive")
 	}
 	if len(cfg.Targets) == 0 {
 		return fmt.Errorf("at least one target ratio is required")
@@ -109,11 +135,14 @@ func Run(cfg Config) error {
 		return err
 	}
 
-	encoder := ffmpeg.DetectPreferredEncoder(bins.FFmpeg, cfg.Encoder)
+	hooks := processHooks(cfg)
+	encoder := ffmpeg.DetectPreferredEncoder(bins.FFmpeg, cfg.Encoder, hooks)
 	emitLog(cfg, "ffmpeg: %s", bins.FFmpeg)
 	emitLog(cfg, "ffprobe: %s", bins.FFprobe)
 	emitLog(cfg, "binary source: %s", bins.Source)
 	emitLog(cfg, "video encoder: %s", encoder)
+	emitLog(cfg, "black border mode: %s", cfg.BlackBorderMode)
+	emitLog(cfg, "black border detect: first-second avg of 4 frames, threshold<=%d, black-ratio>=%d%%, min-run=%d", cfg.BlackLineThreshold, cfg.BlackLineRatioPercent, cfg.BlackLineRequiredRun)
 
 	videos, err := ffmpeg.FindVideos(cfg.WorkDir)
 	if err != nil {
@@ -129,6 +158,9 @@ func Run(cfg Config) error {
 
 	completedTasks := 0
 	for _, videoPath := range videos {
+		if err := waitForControl(cfg); err != nil {
+			return err
+		}
 		if err := processVideo(cfg, bins, encoder, videoPath, completedTasks, totalTasks); err != nil {
 			return err
 		}
@@ -144,19 +176,82 @@ func Run(cfg Config) error {
 }
 
 func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath string, completedBase int, totalTasks int) error {
-	meta, err := ffmpeg.Probe(bins.FFprobe, videoPath)
+	if err := waitForControl(cfg); err != nil {
+		return err
+	}
+	hooks := processHooks(cfg)
+	meta, err := ffmpeg.Probe(bins.FFprobe, videoPath, hooks)
 	if err != nil {
+		if cfg.Controller != nil && cfg.Controller.StopRequested() {
+			return ErrStopped
+		}
 		return err
 	}
 
-	rotate, width, height := ffmpeg.PlannedDimensions(meta.Width, meta.Height)
+	crop := ffmpeg.CropRect{}
 	videoName := filepath.Base(videoPath)
-	emitLog(cfg, "processing %s (source=%dx%d rotate=%v normalized=%dx%d)", videoName, meta.Width, meta.Height, rotate, width, height)
+	emitLog(cfg, "analyzing black borders for %s", videoName)
+	emitProgress(cfg, ProgressUpdate{
+		TotalTasks:     totalTasks,
+		CompletedTasks: completedBase,
+		CurrentTask:    completedBase + 1,
+		VideoName:      videoName,
+		TargetLabel:    "黑边分析",
+		TotalFrames:    meta.Frames,
+		Percent:        percentForAnalysis(completedBase, totalTasks, 0, meta.Frames),
+	})
+	detection, detectErr := ffmpeg.DetectBlackBorders(bins.FFmpeg, videoPath, meta.Width, meta.Height, ffmpeg.BlackBorderOptions{
+		Mode:           cfg.BlackBorderMode,
+		LineThreshold:   cfg.BlackLineThreshold,
+		LineRatio:       float64(cfg.BlackLineRatioPercent) / 100.0,
+		RequiredRun:     cfg.BlackLineRequiredRun,
+		SampleFPS:       4,
+		SampleDuration:  1,
+		SampleFrameCap:  4,
+	}, hooks, func(processedFrames int) {
+		emitProgress(cfg, ProgressUpdate{
+			TotalTasks:     totalTasks,
+			CompletedTasks: completedBase,
+			CurrentTask:    completedBase + 1,
+			VideoName:      videoName,
+			TargetLabel:    "黑边分析",
+			CurrentFrame:   processedFrames,
+			TotalFrames:    meta.Frames,
+			Percent:        percentForAnalysis(completedBase, totalTasks, processedFrames, meta.Frames),
+		})
+	})
+	if errors.Is(detectErr, ErrStopped) || (cfg.Controller != nil && cfg.Controller.StopRequested()) {
+		return ErrStopped
+	}
+	if detectErr != nil {
+		emitLog(cfg, "black border detection skipped for %s: %v", videoName, detectErr)
+	} else if detection.Rect.HasCrop() {
+		crop = detection.Rect
+		emitLog(cfg, "black border crop detected for %s: crop=%dx%d:%d:%d (samples=%d)", videoName, crop.Width, crop.Height, crop.X, crop.Y, detection.Frames)
+	}
+	emitProgress(cfg, ProgressUpdate{
+		TotalTasks:     totalTasks,
+		CompletedTasks: completedBase,
+		CurrentTask:    completedBase + 1,
+		VideoName:      videoName,
+		TargetLabel:    "黑边分析",
+		CurrentFrame:   meta.Frames,
+		TotalFrames:    meta.Frames,
+		Percent:        percentForAnalysis(completedBase, totalTasks, meta.Frames, meta.Frames),
+	})
+
+	activeWidth := crop.ActiveWidth(meta.Width)
+	activeHeight := crop.ActiveHeight(meta.Height)
+	rotate, width, height := ffmpeg.PlannedDimensions(activeWidth, activeHeight)
+	emitLog(cfg, "processing %s (source=%dx%d active=%dx%d rotate=%v normalized=%dx%d)", videoName, meta.Width, meta.Height, activeWidth, activeHeight, rotate, width, height)
 
 	for index, target := range cfg.Targets {
+		if err := waitForControl(cfg); err != nil {
+			return err
+		}
 		taskIndex := completedBase + index
 		targetHeight := int(float64(width) / target.Ratio)
-		filter := ffmpeg.BuildFilter(rotate, width, height, targetHeight, cfg.BlurSigma, cfg.FeatherPx)
+		filter := ffmpeg.BuildFilter(rotate, width, height, crop, targetHeight, cfg.BlurSigma, cfg.FeatherPx)
 		emitProgress(cfg, ProgressUpdate{
 			TotalTasks:     totalTasks,
 			CompletedTasks: taskIndex,
@@ -164,7 +259,7 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 			VideoName:      videoName,
 			TargetLabel:    target.Label,
 			TotalFrames:    meta.Frames,
-			Percent:        percentForTask(taskIndex, totalTasks, 0, meta.Frames),
+			Percent:        percentForTask(taskIndex, totalTasks, 0, meta.Frames, index == 0),
 		})
 
 		outDir := filepath.Join(cfg.OutputDir, target.Label)
@@ -177,7 +272,7 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 		emitLog(cfg, "rendering %s -> %s", videoName, outPath)
 
 		lastFrame := 0
-		err := ffmpeg.RunWithProgress(cmd, meta.Frames, func(frame int) {
+		err := ffmpeg.RunWithProgress(cmd, func(frame int) {
 			emitProgress(cfg, ProgressUpdate{
 				TotalTasks:     totalTasks,
 				CompletedTasks: taskIndex,
@@ -186,7 +281,7 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 				TargetLabel:    target.Label,
 				CurrentFrame:   frame,
 				TotalFrames:    meta.Frames,
-				Percent:        percentForTask(taskIndex, totalTasks, frame, meta.Frames),
+				Percent:        percentForTask(taskIndex, totalTasks, frame, meta.Frames, index == 0),
 			})
 
 			if meta.Frames > 0 {
@@ -202,8 +297,11 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 				emitLog(cfg, "[%s] %s frame=%d", target.Label, videoName, frame)
 				lastFrame = frame
 			}
-		})
+		}, hooks)
 		if err != nil {
+			if cfg.Controller != nil && cfg.Controller.StopRequested() {
+				return ErrStopped
+			}
 			return fmt.Errorf("render %s for %s: %w", target.Label, filepath.Base(videoPath), err)
 		}
 		emitProgress(cfg, ProgressUpdate{
@@ -214,14 +312,53 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 			TargetLabel:    target.Label,
 			CurrentFrame:   meta.Frames,
 			TotalFrames:    meta.Frames,
-			Percent:        percentForTask(taskIndex+1, totalTasks, meta.Frames, meta.Frames),
+			Percent:        percentForCompletedTasks(taskIndex+1, totalTasks),
 		})
 	}
 
 	return nil
 }
 
-func percentForTask(completedTasks int, totalTasks int, currentFrame int, totalFrames int) float64 {
+func waitForControl(cfg Config) error {
+	if cfg.Controller == nil {
+		return nil
+	}
+	return cfg.Controller.WaitIfPaused()
+}
+
+func processHooks(cfg Config) *ffmpeg.ProcessHooks {
+	if cfg.Controller == nil {
+		return nil
+	}
+	return &ffmpeg.ProcessHooks{
+		Started:  cfg.Controller.AttachProcess,
+		Finished: cfg.Controller.DetachProcess,
+	}
+}
+
+func percentForTask(completedTasks int, totalTasks int, currentFrame int, totalFrames int, analysisReserved bool) float64 {
+	if totalTasks <= 0 {
+		return 0
+	}
+	progressUnits := float64(completedTasks)
+	baseWithinTask := 0.0
+	renderWeight := 1.0
+	if analysisReserved {
+		baseWithinTask = 0.15
+		renderWeight = 0.85
+	}
+	progressUnits += baseWithinTask
+	if totalFrames > 0 && currentFrame > 0 {
+		framePortion := float64(currentFrame) / float64(totalFrames)
+		if framePortion > 1 {
+			framePortion = 1
+		}
+		progressUnits += framePortion * renderWeight
+	}
+	return progressUnits / float64(totalTasks) * 100
+}
+
+func percentForAnalysis(completedTasks int, totalTasks int, currentFrame int, totalFrames int) float64 {
 	if totalTasks <= 0 {
 		return 0
 	}
@@ -231,9 +368,16 @@ func percentForTask(completedTasks int, totalTasks int, currentFrame int, totalF
 		if framePortion > 1 {
 			framePortion = 1
 		}
-		progressUnits += framePortion
+		progressUnits += framePortion * 0.15
 	}
 	return progressUnits / float64(totalTasks) * 100
+}
+
+func percentForCompletedTasks(completedTasks int, totalTasks int) float64 {
+	if totalTasks <= 0 {
+		return 0
+	}
+	return float64(completedTasks) / float64(totalTasks) * 100
 }
 
 func buildCommand(ffmpegPath string, encoder string, inputPath string, outputPath string, filter string) *exec.Cmd {

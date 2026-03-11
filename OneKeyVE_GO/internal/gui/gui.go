@@ -3,6 +3,8 @@
 package gui
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,9 +38,12 @@ const (
 	idUseCFFmpeg
 	idScan
 	idEncoderCombo
+	idBlackModeCombo
 	idBlurEdit
 	idFeatherEdit
 	idRun
+	idPause
+	idStop
 	idOpenOutput
 	idSummaryEdit
 	idStatusStatic
@@ -49,6 +54,12 @@ const (
 const (
 	msgLogUpdate = win.WM_APP + 1
 	msgRunDone   = win.WM_APP + 2
+)
+
+const (
+	autoSaveTimerID       = 1
+	autoSaveIntervalMilli = 30000
+	configFileName        = "onekeyve_gui_config.json"
 )
 
 const (
@@ -77,6 +88,7 @@ type uiState struct {
 	ffmpegEdit    win.HWND
 	ffprobeEdit   win.HWND
 	encoderCombo  win.HWND
+	blackModeCombo win.HWND
 	blurEdit      win.HWND
 	featherEdit   win.HWND
 	summaryEdit   win.HWND
@@ -84,6 +96,8 @@ type uiState struct {
 	logEdit       win.HWND
 	progressBar   win.HWND
 	runButton     win.HWND
+	pauseButton   win.HWND
+	stopButton    win.HWND
 
 	fontNormal win.HFONT
 	fontTitle  win.HFONT
@@ -103,11 +117,31 @@ type uiState struct {
 	summary          string
 	progress         int
 	running          bool
+	paused           bool
+	stopping         bool
+	runStopped       bool
 	runErr           error
+	controller       *appcore.RunController
 	refreshPending   bool
 	renderedLog      string
 	renderedStatus   string
 	renderedProgress int
+	configPath       string
+	lastConfigSaveErr string
+}
+
+type persistedConfig struct {
+	WorkDir               string `json:"work_dir"`
+	OutputDir             string `json:"output_dir"`
+	FFmpegPath            string `json:"ffmpeg_path"`
+	FFprobePath           string `json:"ffprobe_path"`
+	Encoder               string `json:"encoder"`
+	BlackBorderMode       string `json:"black_border_mode"`
+	BlurSigma             int    `json:"blur_sigma"`
+	FeatherPx             int    `json:"feather_px"`
+	BlackLineThreshold    int    `json:"black_line_threshold"`
+	BlackLineRatioPercent int    `json:"black_line_ratio_percent"`
+	BlackLineRequiredRun  int    `json:"black_line_required_run"`
 }
 
 var globalState *uiState
@@ -186,6 +220,7 @@ func Run() error {
 }
 
 func newUIState() *uiState {
+	configPath := configFilePath()
 	return &uiState{
 		bgBrush:             createSolidBrush(win.RGB(14, 17, 22)),
 		panelBrush:          createSolidBrush(win.RGB(19, 23, 31)),
@@ -196,6 +231,7 @@ func newUIState() *uiState {
 		buttonPrimaryBrush:  createSolidBrush(win.RGB(62, 78, 96)),
 		buttonDisabledBrush: createSolidBrush(win.RGB(43, 47, 55)),
 		statusText:          "\u51c6\u5907\u5c31\u7eea",
+		configPath:          configPath,
 	}
 }
 
@@ -245,12 +281,24 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 			state.finishRun()
 		}
 		return 0
+	case win.WM_TIMER:
+		if state != nil && wParam == autoSaveTimerID {
+			state.handleConfigSaveResult(state.saveCurrentConfig())
+		}
+		return 0
 	case win.WM_CTLCOLORSTATIC:
 		if state != nil {
 			hdc := win.HDC(wParam)
 			win.SetBkMode(hdc, win.TRANSPARENT)
 			win.SetTextColor(hdc, win.RGB(226, 232, 239))
 			return uintptr(state.panelBrush)
+		}
+	case win.WM_CTLCOLORLISTBOX:
+		if state != nil {
+			hdc := win.HDC(wParam)
+			win.SetBkColor(hdc, win.RGB(24, 29, 38))
+			win.SetTextColor(hdc, win.RGB(236, 239, 244))
+			return uintptr(state.editBrush)
 		}
 	case win.WM_CTLCOLOREDIT:
 		if state != nil {
@@ -274,9 +322,20 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 			messageBox(hwnd, "\u6b63\u5728\u5904\u7406", "\u5f53\u524d\u4ecd\u6709\u4efb\u52a1\u5728\u8fd0\u884c\uff0c\u8bf7\u7b49\u5f85\u5904\u7406\u5b8c\u6210\u540e\u518d\u5173\u95ed\u7a97\u53e3\u3002", win.MB_ICONINFORMATION)
 			return 0
 		}
+		if state != nil {
+			saveErr := state.saveCurrentConfig()
+			state.handleConfigSaveResult(saveErr)
+			if saveErr != nil {
+				messageBox(hwnd, "\u914d\u7f6e\u4fdd\u5b58\u5931\u8d25", saveErr.Error(), win.MB_ICONWARNING)
+			}
+		}
 		win.DestroyWindow(hwnd)
 		return 0
 	case win.WM_DESTROY:
+		if state != nil {
+			win.KillTimer(hwnd, autoSaveTimerID)
+			state.destroyResources()
+		}
 		win.PostQuitMessage(0)
 		return 0
 	}
@@ -287,8 +346,10 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 func (s *uiState) initControls() {
 	s.fontNormal = createFont(18, 400, "Segoe UI")
 	s.fontTitle = createFont(32, 700, "Segoe UI Semibold")
-	workDir := preferredWorkDir(currentWorkingDir())
-	outputDir := filepath.Join(workDir, "output-gui")
+	defaultCfg := appcore.DefaultConfig(preferredWorkDir(currentWorkingDir()))
+	saved := s.loadSavedConfig(defaultCfg)
+	workDir := saved.WorkDir
+	outputDir := saved.OutputDir
 	createLabel(s.hwnd, "\u89c6\u9891\u76ee\u5f55", 28, 118, 140, 24, s.fontNormal)
 	s.workDirEdit = createEdit(s.hwnd, idWorkDirEdit, workDir, 28, 146, 360, 30)
 	createButton(s.hwnd, idWorkDirBrowse, "\u6d4f\u89c8\u76ee\u5f55", 398, 146, 104, 30)
@@ -296,32 +357,41 @@ func (s *uiState) initControls() {
 	s.outputDirEdit = createEdit(s.hwnd, idOutputDirEdit, outputDir, 28, 218, 360, 30)
 	createButton(s.hwnd, idOutputDirBrowse, "\u6d4f\u89c8\u76ee\u5f55", 398, 218, 104, 30)
 	createLabel(s.hwnd, "FFmpeg", 28, 262, 100, 24, s.fontNormal)
-	s.ffmpegEdit = createEdit(s.hwnd, idFFmpegEdit, firstNonEmpty(os.Getenv("ONEKEYVE_FFMPEG"), os.Getenv("FFMPEG_PATH"), "C:\\ffmpeg\\bin\\ffmpeg.exe"), 28, 290, 360, 30)
+	s.ffmpegEdit = createEdit(s.hwnd, idFFmpegEdit, saved.FFmpegPath, 28, 290, 360, 30)
 	createButton(s.hwnd, idFFmpegBrowse, "\u9009\u62e9\u6587\u4ef6", 398, 290, 104, 30)
 	createLabel(s.hwnd, "FFprobe", 28, 334, 100, 24, s.fontNormal)
-	s.ffprobeEdit = createEdit(s.hwnd, idFFprobeEdit, firstNonEmpty(os.Getenv("ONEKEYVE_FFPROBE"), os.Getenv("FFPROBE_PATH"), "C:\\ffmpeg\\bin\\ffprobe.exe"), 28, 362, 360, 30)
+	s.ffprobeEdit = createEdit(s.hwnd, idFFprobeEdit, saved.FFprobePath, 28, 362, 360, 30)
 	createButton(s.hwnd, idFFprobeBrowse, "\u9009\u62e9\u6587\u4ef6", 398, 362, 104, 30)
 	createButton(s.hwnd, idUseCFFmpeg, "\u4f7f\u7528 C:\\ffmpeg", 28, 406, 160, 32)
 	createButton(s.hwnd, idScan, "\u626b\u63cf\u73af\u5883", 198, 406, 120, 32)
 	createLabel(s.hwnd, "\u7f16\u7801\u5668", 28, 462, 100, 24, s.fontNormal)
-	s.encoderCombo = createComboBox(s.hwnd, idEncoderCombo, 28, 490, 220, 240)
-	addComboItems(s.encoderCombo, []string{"\u81ea\u52a8", "h264_nvenc", "libx264"})
-	win.SendMessage(s.encoderCombo, win.CB_SETCURSEL, 0, 0)
-	createLabel(s.hwnd, "\u80cc\u666f\u6a21\u7cca", 272, 462, 120, 24, s.fontNormal)
-	s.blurEdit = createEdit(s.hwnd, idBlurEdit, "20", 272, 490, 90, 30)
-	createLabel(s.hwnd, "\u7fbd\u5316\u50cf\u7d20", 388, 462, 120, 24, s.fontNormal)
-	s.featherEdit = createEdit(s.hwnd, idFeatherEdit, "30", 388, 490, 90, 30)
-	s.runButton = createButton(s.hwnd, idRun, "\u5f00\u59cb\u5904\u7406", 28, 548, 220, 42)
-	createButton(s.hwnd, idOpenOutput, "\u6253\u5f00\u8f93\u51fa\u76ee\u5f55", 262, 548, 160, 42)
-	createLabel(s.hwnd, "\u8fd0\u884c\u72b6\u6001", 28, 612, 100, 24, s.fontNormal)
-	s.statusStatic = createLabel(s.hwnd, s.statusText, 28, 640, 474, 48, s.fontNormal)
-	s.progressBar = createProgressBar(s.hwnd, idProgressBar, 28, 698, 474, 24)
+	s.encoderCombo = createComboBox(s.hwnd, idEncoderCombo, 28, 490, 150, 240)
+	addComboItems(s.encoderCombo, []string{"h264_nvenc", "libx264", "\u81ea\u52a8"})
+	setComboSelectionByText(s.encoderCombo, saved.Encoder)
+	createLabel(s.hwnd, "\u53bb\u9ed1\u8fb9\u65b9\u5f0f", 198, 462, 140, 24, s.fontNormal)
+	s.blackModeCombo = createComboBox(s.hwnd, idBlackModeCombo, 198, 490, 180, 240)
+	addComboItems(s.blackModeCombo, []string{ffmpeg.BlackBorderModeCenterCrop, ffmpeg.BlackBorderModeLegacy})
+	setComboSelectionByText(s.blackModeCombo, saved.BlackBorderMode)
+	createLabel(s.hwnd, "\u80cc\u666f\u6a21\u7cca", 388, 462, 120, 24, s.fontNormal)
+	s.blurEdit = createEdit(s.hwnd, idBlurEdit, strconv.Itoa(saved.BlurSigma), 388, 490, 90, 30)
+	createLabel(s.hwnd, "\u7fbd\u5316\u50cf\u7d20", 28, 534, 120, 24, s.fontNormal)
+	s.featherEdit = createEdit(s.hwnd, idFeatherEdit, strconv.Itoa(saved.FeatherPx), 28, 562, 90, 30)
+	s.runButton = createButton(s.hwnd, idRun, "\u5f00\u59cb\u5904\u7406", 28, 614, 140, 42)
+	s.pauseButton = createButton(s.hwnd, idPause, "\u6682\u505c\u5904\u7406", 178, 614, 120, 42)
+	s.stopButton = createButton(s.hwnd, idStop, "\u505c\u6b62\u5904\u7406", 308, 614, 116, 42)
+	createButton(s.hwnd, idOpenOutput, "\u6253\u5f00\u8f93\u51fa\u76ee\u5f55", 28, 664, 220, 38)
+	createLabel(s.hwnd, "\u8fd0\u884c\u72b6\u6001", 28, 716, 100, 24, s.fontNormal)
+	s.statusStatic = createLabel(s.hwnd, s.statusText, 28, 744, 474, 48, s.fontNormal)
+	s.progressBar = createProgressBar(s.hwnd, idProgressBar, 28, 802, 474, 24)
 	win.SendMessage(s.progressBar, win.PBM_SETRANGE32, 0, 1000)
 	win.ShowWindow(s.progressBar, win.SW_HIDE)
+	win.EnableWindow(s.pauseButton, false)
+	win.EnableWindow(s.stopButton, false)
 	createLabel(s.hwnd, "\u73af\u5883\u6458\u8981", 540, 118, 180, 24, s.fontNormal)
 	s.summaryEdit = createReadOnlyEdit(s.hwnd, idSummaryEdit, "", 540, 146, 736, 176)
 	createLabel(s.hwnd, "\u8fd0\u884c\u65e5\u5fd7", 540, 350, 100, 24, s.fontNormal)
-	s.logEdit = createReadOnlyEdit(s.hwnd, idLogEdit, "", 540, 378, 736, 424)
+	s.logEdit = createLogListBox(s.hwnd, idLogEdit, 540, 378, 736, 424)
+	win.SetTimer(s.hwnd, autoSaveTimerID, autoSaveIntervalMilli, 0)
 }
 func (s *uiState) handleCommand(id uint16) {
 	switch int(id) {
@@ -355,6 +425,8 @@ func (s *uiState) handleCommand(id uint16) {
 	case idScan:
 		s.updateSummary()
 		messageBox(s.hwnd, "\u626b\u63cf\u5b8c\u6210", s.summary, win.MB_ICONINFORMATION)
+	case idEncoderCombo, idBlackModeCombo:
+		s.updateSummary()
 	case idOpenOutput:
 		outputDir := strings.TrimSpace(getWindowText(s.outputDirEdit))
 		if outputDir == "" {
@@ -375,6 +447,10 @@ func (s *uiState) handleCommand(id uint16) {
 		)
 	case idRun:
 		s.startRun()
+	case idPause:
+		s.togglePause()
+	case idStop:
+		s.stopRun()
 	}
 }
 
@@ -387,17 +463,23 @@ func (s *uiState) startRun() {
 		messageBox(s.hwnd, "\u914d\u7f6e\u9519\u8bef", err.Error(), win.MB_ICONERROR)
 		return
 	}
+	controller := appcore.NewRunController()
+	cfg.Controller = controller
 	cfg.OnLog = s.appendLog
 	cfg.OnProgress = s.applyProgress
 	s.mu.Lock()
 	s.running = true
+	s.paused = false
+	s.stopping = false
+	s.runStopped = false
 	s.runErr = nil
+	s.controller = controller
 	s.statusText = "\u5f00\u59cb\u5904\u7406"
 	s.progress = 0
 	s.logLines = nil
 	s.refreshPending = false
 	s.mu.Unlock()
-	win.EnableWindow(s.runButton, false)
+	s.refreshButtons()
 	win.ShowWindow(s.progressBar, win.SW_SHOW)
 	win.SendMessage(s.progressBar, win.PBM_SETPOS, 0, 0)
 	s.refreshLog()
@@ -408,8 +490,14 @@ func (s *uiState) startRun() {
 		err := appcore.Run(cfg)
 		s.mu.Lock()
 		s.running = false
+		s.paused = false
+		s.stopping = false
 		s.runErr = err
-		if err != nil {
+		s.controller = nil
+		if errors.Is(err, appcore.ErrStopped) {
+			s.runStopped = true
+			s.statusText = "\u5904\u7406\u5df2\u505c\u6b62"
+		} else if err != nil {
 			s.statusText = "\u5904\u7406\u5931\u8d25"
 			s.progress = 0
 		} else {
@@ -422,9 +510,72 @@ func (s *uiState) startRun() {
 		win.PostMessage(s.hwnd, msgRunDone, 0, 0)
 	}()
 }
+
+func (s *uiState) togglePause() {
+	s.mu.Lock()
+	if !s.running || s.controller == nil || s.stopping {
+		s.mu.Unlock()
+		return
+	}
+	controller := s.controller
+	nextPaused := !s.paused
+	s.mu.Unlock()
+
+	if err := controller.SetPaused(nextPaused); err != nil {
+		if !errors.Is(err, appcore.ErrStopped) {
+			messageBox(s.hwnd, "\u64cd\u4f5c\u5931\u8d25", err.Error(), win.MB_ICONERROR)
+		}
+		return
+	}
+
+	s.mu.Lock()
+	s.paused = nextPaused
+	if nextPaused {
+		s.statusText = "\u5904\u7406\u5df2\u6682\u505c"
+		s.prependLogLocked("\u7528\u6237\u5df2\u6682\u505c\u5f53\u524d\u4efb\u52a1\u3002")
+	} else {
+		s.statusText = "\u7ee7\u7eed\u5904\u7406"
+		s.prependLogLocked("\u7528\u6237\u5df2\u7ee7\u7eed\u5f53\u524d\u4efb\u52a1\u3002")
+	}
+	s.requestRefreshLocked()
+	s.mu.Unlock()
+
+	s.refreshButtons()
+}
+
+func (s *uiState) stopRun() {
+	s.mu.Lock()
+	if !s.running || s.controller == nil || s.stopping {
+		s.mu.Unlock()
+		return
+	}
+	controller := s.controller
+	s.stopping = true
+	s.paused = false
+	s.statusText = "\u6b63\u5728\u505c\u6b62"
+	s.prependLogLocked("\u7528\u6237\u53d1\u51fa\u505c\u6b62\u8bf7\u6c42\u3002")
+	s.requestRefreshLocked()
+	s.mu.Unlock()
+
+	s.refreshButtons()
+	if err := controller.RequestStop(); err != nil {
+		s.mu.Lock()
+		s.stopping = false
+		s.requestRefreshLocked()
+		s.mu.Unlock()
+		s.refreshButtons()
+		messageBox(s.hwnd, "\u64cd\u4f5c\u5931\u8d25", err.Error(), win.MB_ICONERROR)
+	}
+}
+
 func (s *uiState) finishRun() {
 	s.refreshLog()
-	win.EnableWindow(s.runButton, true)
+	s.refreshButtons()
+	if s.runStopped {
+		win.ShowWindow(s.progressBar, win.SW_HIDE)
+		messageBox(s.hwnd, "\u5df2\u505c\u6b62", "\u5f53\u524d\u4efb\u52a1\u5df2\u6309\u7528\u6237\u8bf7\u6c42\u505c\u6b62\u3002", win.MB_ICONINFORMATION)
+		return
+	}
 	if s.runErr != nil {
 		win.ShowWindow(s.progressBar, win.SW_HIDE)
 		messageBox(s.hwnd, "\u5904\u7406\u5931\u8d25", s.runErr.Error(), win.MB_ICONERROR)
@@ -460,9 +611,12 @@ func (s *uiState) readConfig() (appcore.Config, error) {
 	cfg.BlurSigma = blur
 	cfg.FeatherPx = feather
 	encoder := getComboSelection(s.encoderCombo)
-	if encoder != "\u81ea\u52a8" {
+	if encoder == "\u81ea\u52a8" {
+		cfg.Encoder = ""
+	} else {
 		cfg.Encoder = encoder
 	}
+	cfg.BlackBorderMode = getComboSelection(s.blackModeCombo)
 	return cfg, nil
 }
 func (s *uiState) updateSummary() {
@@ -487,6 +641,8 @@ func (s *uiState) updateSummary() {
 		lines = append(lines, "\u6765\u6e90: "+bins.Source)
 	}
 	lines = append(lines, "\u8f93\u51fa\u76ee\u5f55: "+outputDir)
+	lines = append(lines, "\u7f16\u7801\u7b56\u7565: "+getComboSelection(s.encoderCombo))
+	lines = append(lines, "\u53bb\u9ed1\u8fb9\u65b9\u5f0f: "+getComboSelection(s.blackModeCombo))
 	lines = append(lines, "\u8bf4\u660e: \u5141\u8bb8\u8bfb\u53d6 C:\\ffmpeg\uff0c\u4f46\u4e0d\u4f1a\u628a\u8f93\u51fa\u5199\u5165 C \u76d8\u3002")
 	s.mu.Lock()
 	s.summary = strings.Join(lines, "\r\n")
@@ -573,13 +729,13 @@ func (s *uiState) appendLog(line string) {
 func (s *uiState) refreshLog() {
 	s.mu.Lock()
 	s.refreshPending = false
-	logText := strings.Join(s.logLines, "\r\n")
+	logText := strings.Join(s.logLines, "\n")
+	logLines := append([]string(nil), s.logLines...)
 	statusText := s.statusText
 	progress := s.progress
 	s.mu.Unlock()
 	if logText != s.renderedLog {
-		setWindowText(s.logEdit, logText)
-		sendToTop(s.logEdit)
+		setListBoxLines(s.logEdit, logLines)
 		s.renderedLog = logText
 	}
 	if statusText != s.renderedStatus {
@@ -591,10 +747,43 @@ func (s *uiState) refreshLog() {
 		s.renderedProgress = progress
 	}
 }
+
+func (s *uiState) refreshButtons() {
+	s.mu.Lock()
+	running := s.running
+	paused := s.paused
+	stopping := s.stopping
+	s.mu.Unlock()
+
+	win.EnableWindow(s.runButton, !running)
+	win.EnableWindow(s.pauseButton, running && !stopping)
+	win.EnableWindow(s.stopButton, running && !stopping)
+	if paused {
+		setWindowText(s.pauseButton, "\u7ee7\u7eed\u5904\u7406")
+	} else {
+		setWindowText(s.pauseButton, "\u6682\u505c\u5904\u7406")
+	}
+}
 func (s *uiState) isRunning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.running
+}
+
+func (s *uiState) destroyResources() {
+	if s == nil {
+		return
+	}
+	deleteGDIObject(&s.fontNormal)
+	deleteGDIObject(&s.fontTitle)
+	deleteGDIObject(&s.bgBrush)
+	deleteGDIObject(&s.panelBrush)
+	deleteGDIObject(&s.headerBrush)
+	deleteGDIObject(&s.editBrush)
+	deleteGDIObject(&s.accentBrush)
+	deleteGDIObject(&s.buttonBrush)
+	deleteGDIObject(&s.buttonPrimaryBrush)
+	deleteGDIObject(&s.buttonDisabledBrush)
 }
 
 func (s *uiState) paintBackground(hdc win.HDC) {
@@ -749,6 +938,22 @@ func createReadOnlyEdit(parent win.HWND, id int, text string, x, y, w, h int32) 
 	return hwnd
 }
 
+func createLogListBox(parent win.HWND, id int, x, y, w, h int32) win.HWND {
+	hwnd := win.CreateWindowEx(
+		win.WS_EX_CLIENTEDGE,
+		syscall.StringToUTF16Ptr("LISTBOX"),
+		nil,
+		win.WS_CHILD|win.WS_VISIBLE|win.WS_VSCROLL|win.WS_HSCROLL|win.LBS_NOINTEGRALHEIGHT|win.LBS_DISABLENOSCROLL|win.LBS_NOTIFY,
+		x, y, w, h,
+		parent,
+		win.HMENU(id),
+		0,
+		nil,
+	)
+	applyFont(hwnd, globalState.fontNormal)
+	return hwnd
+}
+
 func createComboBox(parent win.HWND, id int, x, y, w, h int32) win.HWND {
 	hwnd := win.CreateWindowEx(
 		0,
@@ -782,6 +987,21 @@ func createProgressBar(parent win.HWND, id int, x, y, w, h int32) win.HWND {
 func addComboItems(hwnd win.HWND, items []string) {
 	for _, item := range items {
 		win.SendMessage(hwnd, win.CB_ADDSTRING, 0, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(item))))
+	}
+}
+
+func setComboSelectionByText(hwnd win.HWND, text string) {
+	count := int(win.SendMessage(hwnd, win.CB_GETCOUNT, 0, 0))
+	for i := 0; i < count; i++ {
+		buf := make([]uint16, 256)
+		win.SendMessage(hwnd, win.CB_GETLBTEXT, uintptr(i), uintptr(unsafe.Pointer(&buf[0])))
+		if syscall.UTF16ToString(buf) == text {
+			win.SendMessage(hwnd, win.CB_SETCURSEL, uintptr(i), 0)
+			return
+		}
+	}
+	if count > 0 {
+		win.SendMessage(hwnd, win.CB_SETCURSEL, 0, 0)
 	}
 }
 
@@ -825,9 +1045,167 @@ func setWindowText(hwnd win.HWND, text string) {
 	win.SendMessage(hwnd, win.WM_SETTEXT, 0, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(text))))
 }
 
-func sendToTop(hwnd win.HWND) {
-	win.SendMessage(hwnd, win.EM_SETSEL, 0, 0)
-	win.SendMessage(hwnd, win.EM_SCROLLCARET, 0, 0)
+func setListBoxLines(hwnd win.HWND, lines []string) {
+	if hwnd == 0 {
+		return
+	}
+	win.SendMessage(hwnd, win.WM_SETREDRAW, 0, 0)
+	win.SendMessage(hwnd, win.LB_RESETCONTENT, 0, 0)
+	maxWidth := 0
+	for _, line := range lines {
+		win.SendMessage(hwnd, win.LB_ADDSTRING, 0, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(line))))
+		if width := approximateTextWidth(line); width > maxWidth {
+			maxWidth = width
+		}
+	}
+	win.SendMessage(hwnd, win.LB_SETHORIZONTALEXTENT, uintptr(maxWidth), 0)
+	win.SendMessage(hwnd, win.WM_SETREDRAW, 1, 0)
+	win.InvalidateRect(hwnd, nil, true)
+	win.UpdateWindow(hwnd)
+}
+
+func approximateTextWidth(text string) int {
+	length := len([]rune(text))
+	if length == 0 {
+		return 0
+	}
+	return length*9 + 24
+}
+
+func (s *uiState) loadSavedConfig(defaultCfg appcore.Config) persistedConfig {
+	cfg := persistedConfig{
+		WorkDir:               defaultCfg.WorkDir,
+		OutputDir:             filepath.Join(defaultCfg.WorkDir, "output-gui"),
+		FFmpegPath:            firstNonEmpty(os.Getenv("ONEKEYVE_FFMPEG"), os.Getenv("FFMPEG_PATH"), "C:\\ffmpeg\\bin\\ffmpeg.exe"),
+		FFprobePath:           firstNonEmpty(os.Getenv("ONEKEYVE_FFPROBE"), os.Getenv("FFPROBE_PATH"), "C:\\ffmpeg\\bin\\ffprobe.exe"),
+		Encoder:               defaultCfg.Encoder,
+		BlackBorderMode:       defaultCfg.BlackBorderMode,
+		BlurSigma:             defaultCfg.BlurSigma,
+		FeatherPx:             defaultCfg.FeatherPx,
+		BlackLineThreshold:    defaultCfg.BlackLineThreshold,
+		BlackLineRatioPercent: defaultCfg.BlackLineRatioPercent,
+		BlackLineRequiredRun:  defaultCfg.BlackLineRequiredRun,
+	}
+	if s == nil || strings.TrimSpace(s.configPath) == "" {
+		return cfg
+	}
+	raw, err := os.ReadFile(s.configPath)
+	if err != nil {
+		return cfg
+	}
+	var saved persistedConfig
+	if json.Unmarshal(raw, &saved) != nil {
+		return cfg
+	}
+	if strings.TrimSpace(saved.WorkDir) != "" {
+		cfg.WorkDir = saved.WorkDir
+	}
+	if strings.TrimSpace(saved.OutputDir) != "" {
+		cfg.OutputDir = saved.OutputDir
+	}
+	if strings.TrimSpace(saved.FFmpegPath) != "" {
+		cfg.FFmpegPath = saved.FFmpegPath
+	}
+	if strings.TrimSpace(saved.FFprobePath) != "" {
+		cfg.FFprobePath = saved.FFprobePath
+	}
+	if strings.TrimSpace(saved.Encoder) != "" {
+		cfg.Encoder = saved.Encoder
+	}
+	if strings.TrimSpace(saved.BlackBorderMode) != "" {
+		cfg.BlackBorderMode = saved.BlackBorderMode
+	}
+	if saved.BlurSigma > 0 {
+		cfg.BlurSigma = saved.BlurSigma
+	}
+	if saved.FeatherPx > 0 {
+		cfg.FeatherPx = saved.FeatherPx
+	}
+	if saved.BlackLineThreshold >= 0 {
+		cfg.BlackLineThreshold = saved.BlackLineThreshold
+	}
+	if saved.BlackLineRatioPercent > 0 {
+		cfg.BlackLineRatioPercent = saved.BlackLineRatioPercent
+	}
+	if saved.BlackLineRequiredRun > 0 {
+		cfg.BlackLineRequiredRun = saved.BlackLineRequiredRun
+	}
+	return cfg
+}
+
+func (s *uiState) saveCurrentConfig() error {
+	if s == nil || s.hwnd == 0 || strings.TrimSpace(s.configPath) == "" {
+		return nil
+	}
+	payload, err := json.MarshalIndent(s.capturePersistedConfig(), "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.configPath, payload, 0o644)
+}
+
+func (s *uiState) handleConfigSaveResult(err error) {
+	if s == nil {
+		return
+	}
+	if err == nil {
+		s.mu.Lock()
+		s.lastConfigSaveErr = ""
+		s.mu.Unlock()
+		return
+	}
+
+	s.mu.Lock()
+	if s.lastConfigSaveErr == err.Error() {
+		s.mu.Unlock()
+		return
+	}
+	s.lastConfigSaveErr = err.Error()
+	s.mu.Unlock()
+
+	s.appendLog("save config failed: " + err.Error())
+}
+
+func (s *uiState) capturePersistedConfig() persistedConfig {
+	defaultCfg := appcore.DefaultConfig(strings.TrimSpace(getWindowText(s.workDirEdit)))
+	savedCfg := s.loadSavedConfig(defaultCfg)
+	encoder := getComboSelection(s.encoderCombo)
+	if encoder == "" {
+		encoder = defaultCfg.Encoder
+	}
+	blackMode := getComboSelection(s.blackModeCombo)
+	if blackMode == "" {
+		blackMode = defaultCfg.BlackBorderMode
+	}
+	return persistedConfig{
+		WorkDir:               strings.TrimSpace(getWindowText(s.workDirEdit)),
+		OutputDir:             strings.TrimSpace(getWindowText(s.outputDirEdit)),
+		FFmpegPath:            strings.TrimSpace(getWindowText(s.ffmpegEdit)),
+		FFprobePath:           strings.TrimSpace(getWindowText(s.ffprobeEdit)),
+		Encoder:               encoder,
+		BlackBorderMode:       blackMode,
+		BlurSigma:             parseIntOrDefault(getWindowText(s.blurEdit), defaultCfg.BlurSigma),
+		FeatherPx:             parseIntOrDefault(getWindowText(s.featherEdit), defaultCfg.FeatherPx),
+		BlackLineThreshold:    savedCfg.BlackLineThreshold,
+		BlackLineRatioPercent: savedCfg.BlackLineRatioPercent,
+		BlackLineRequiredRun:  savedCfg.BlackLineRequiredRun,
+	}
+}
+
+func parseIntOrDefault(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func configFilePath() string {
+	executablePath, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(executablePath), configFileName)
 }
 
 func chooseFolder(initial string) (string, bool) {
@@ -946,6 +1324,14 @@ func createSolidBrush(rgb win.COLORREF) win.HBRUSH {
 		LbStyle: win.BS_SOLID,
 		LbColor: rgb,
 	})
+}
+
+func deleteGDIObject[T ~uintptr](handle *T) {
+	if handle == nil || *handle == 0 {
+		return
+	}
+	win.DeleteObject(win.HGDIOBJ(*handle))
+	*handle = 0
 }
 
 func fillRect(hdc win.HDC, brush win.HBRUSH, left, top, right, bottom int32) {

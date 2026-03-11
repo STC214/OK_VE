@@ -7,6 +7,35 @@ type RatioTarget struct {
 	Ratio float64
 }
 
+type CropRect struct {
+	X      int
+	Y      int
+	Width  int
+	Height int
+}
+
+func (c CropRect) ActiveWidth(fallback int) int {
+	if c.Width > 0 {
+		return c.Width
+	}
+	return fallback
+}
+
+func (c CropRect) ActiveHeight(fallback int) int {
+	if c.Height > 0 {
+		return c.Height
+	}
+	return fallback
+}
+
+func (c CropRect) HasCrop() bool {
+	return c.Width > 0 && c.Height > 0
+}
+
+func (c CropRect) Filter() string {
+	return fmt.Sprintf("crop=%d:%d:%d:%d,", Even(c.Width), Even(c.Height), maxInt(c.X, 0), maxInt(c.Y, 0))
+}
+
 func Even(n int) int {
 	if n < 0 {
 		return 0
@@ -21,7 +50,7 @@ func PlannedDimensions(width int, height int) (rotate bool, normalizedWidth int,
 	return false, width, height
 }
 
-func BuildFilter(rotate bool, width int, height int, targetHeight int, blurSigma int, featherPx int) string {
+func BuildFilter(rotate bool, width int, height int, crop CropRect, targetHeight int, blurSigma int, featherPx int) string {
 	sw := Even(width)
 	sh := Even(height)
 	sth := Even(targetHeight)
@@ -31,9 +60,13 @@ func BuildFilter(rotate bool, width int, height int, targetHeight int, blurSigma
 	if rotate {
 		transform = "transpose=1"
 	}
+	prefix := ""
+	if crop.HasCrop() {
+		prefix = crop.Filter()
+	}
 
 	return fmt.Sprintf(
-		"[0:v]%s,setsar=1[raw];"+
+		"[0:v]%s%s,setsar=1[raw];"+
 			"[raw]split=2[bg_src][fg_src];"+
 			"[bg_src]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,gblur=sigma=%d[bg];"+
 			"color=c=white:s=%dx%d[m_base];"+
@@ -45,6 +78,7 @@ func BuildFilter(rotate bool, width int, height int, targetHeight int, blurSigma
 			"[fg_src]format=yuva420p[fg_alpha];"+
 			"[fg_alpha][mask]alphamerge[fg_final];"+
 			"[bg][fg_final]overlay=x=0:y=%d:shortest=1:format=auto,format=yuv420p[outv]",
+		prefix,
 		transform,
 		sw, sth, sw, sth, blurSigma,
 		sw, sh,
@@ -55,4 +89,11 @@ func BuildFilter(rotate bool, width int, height int, targetHeight int, blurSigma
 		featherPx,
 		offsetY,
 	)
+}
+
+func maxInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

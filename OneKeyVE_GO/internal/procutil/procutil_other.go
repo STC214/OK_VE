@@ -2,7 +2,18 @@
 
 package procutil
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+)
 
 func HideWindow(cmd *exec.Cmd) {
+}
+
+func SuspendProcess(process *os.Process) error {
+	return nil
+}
+
+func ResumeProcess(process *os.Process) error {
+	return nil
 }
