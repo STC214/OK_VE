@@ -24,6 +24,7 @@ import (
 const (
 	windowClassName = "OneKeyVEWindow"
 	windowTitle     = "OneKeyVE"
+	buttonClassName = "OneKeyVEButton"
 )
 
 const (
@@ -52,14 +53,18 @@ const (
 )
 
 const (
-	msgLogUpdate = win.WM_APP + 1
-	msgRunDone   = win.WM_APP + 2
+	msgLogUpdate    = win.WM_APP + 1
+	msgRunDone      = win.WM_APP + 2
+	msgSummaryReady = win.WM_APP + 3
+	msgControlDone  = win.WM_APP + 4
 )
 
 const (
-	autoSaveTimerID       = 1
-	autoSaveIntervalMilli = 30000
-	configFileName        = "onekeyve_gui_config.json"
+	autoSaveTimerID        = 1
+	uiRefreshTimerID       = 2
+	autoSaveIntervalMilli  = 30000
+	uiRefreshIntervalMilli = 100
+	configFileName         = "onekeyve_gui_config.json"
 )
 
 const (
@@ -67,7 +72,6 @@ const (
 	iconBig                      = 1
 	dwmwaUseImmersiveDarkMode    = 20
 	dwmwaUseImmersiveDarkModeOld = 19
-	odtButton                    = 4
 	bifReturnOnlyFSDirs          = 0x0001
 	bifEditBox                   = 0x0010
 	bifNewDialogStyle            = 0x0040
@@ -83,51 +87,53 @@ var (
 type uiState struct {
 	hwnd win.HWND
 
-	workDirEdit   win.HWND
-	outputDirEdit win.HWND
-	ffmpegEdit    win.HWND
-	ffprobeEdit   win.HWND
-	encoderCombo  win.HWND
+	workDirEdit    win.HWND
+	outputDirEdit  win.HWND
+	ffmpegEdit     win.HWND
+	ffprobeEdit    win.HWND
+	encoderCombo   win.HWND
 	blackModeCombo win.HWND
-	blurEdit      win.HWND
-	featherEdit   win.HWND
-	summaryEdit   win.HWND
-	statusStatic  win.HWND
-	logEdit       win.HWND
-	progressBar   win.HWND
-	runButton     win.HWND
-	pauseButton   win.HWND
-	stopButton    win.HWND
+	blurEdit       win.HWND
+	featherEdit    win.HWND
+	summaryEdit    win.HWND
+	statusStatic   win.HWND
+	logEdit        win.HWND
+	progressBar    win.HWND
+	runButton      win.HWND
+	pauseButton    win.HWND
+	stopButton     win.HWND
 
 	fontNormal win.HFONT
 	fontTitle  win.HFONT
+	fontMono   win.HFONT
 
-	bgBrush             win.HBRUSH
-	panelBrush          win.HBRUSH
-	headerBrush         win.HBRUSH
-	editBrush           win.HBRUSH
-	accentBrush         win.HBRUSH
-	buttonBrush         win.HBRUSH
-	buttonPrimaryBrush  win.HBRUSH
-	buttonDisabledBrush win.HBRUSH
+	bgBrush     win.HBRUSH
+	panelBrush  win.HBRUSH
+	headerBrush win.HBRUSH
+	editBrush   win.HBRUSH
+	accentBrush win.HBRUSH
 
-	mu               sync.Mutex
-	logLines         []string
-	statusText       string
-	summary          string
-	progress         int
-	running          bool
-	paused           bool
-	stopping         bool
-	runStopped       bool
-	runErr           error
-	controller       *appcore.RunController
-	refreshPending   bool
-	renderedLog      string
-	renderedStatus   string
-	renderedProgress int
-	configPath       string
+	mu                sync.Mutex
+	logLines          []string
+	statusText        string
+	summary           string
+	progress          int
+	running           bool
+	paused            bool
+	stopping          bool
+	runStopped        bool
+	runErr            error
+	controller        *appcore.RunController
+	controlBusy       bool
+	refreshPending    bool
+	renderedLog       string
+	renderedStatus    string
+	renderedProgress  int
+	configPath        string
 	lastConfigSaveErr string
+	summarySeq        uint64
+	summaryResult     summaryResult
+	controlResult     controlResult
 }
 
 type persistedConfig struct {
@@ -144,7 +150,47 @@ type persistedConfig struct {
 	BlackLineRequiredRun  int    `json:"black_line_required_run"`
 }
 
-var globalState *uiState
+type buttonVariant int
+
+const (
+	buttonVariantSecondary buttonVariant = iota
+	buttonVariantPrimary
+	buttonVariantDanger
+)
+
+type buttonState struct {
+	variant  buttonVariant
+	hovered  bool
+	pressed  bool
+	tracking bool
+}
+
+type summarySnapshot struct {
+	workDir     string
+	outputDir   string
+	ffmpegPath  string
+	ffprobePath string
+	encoder     string
+	blackMode   string
+}
+
+type summaryResult struct {
+	seq            uint64
+	text           string
+	showCompletion bool
+}
+
+type controlResult struct {
+	action string
+	paused bool
+	err    error
+}
+
+var (
+	globalState    *uiState
+	buttonStates   = map[win.HWND]*buttonState{}
+	buttonStatesMu sync.Mutex
+)
 
 func Run() error {
 	runtime.LockOSThread()
@@ -201,7 +247,7 @@ func Run() error {
 	win.ShowWindow(hwnd, win.SW_SHOW)
 	win.UpdateWindow(hwnd)
 	centerWindow(hwnd)
-	state.updateSummary()
+	state.requestSummaryRefresh(false)
 
 	var msg win.MSG
 	for {
@@ -222,16 +268,13 @@ func Run() error {
 func newUIState() *uiState {
 	configPath := configFilePath()
 	return &uiState{
-		bgBrush:             createSolidBrush(win.RGB(14, 17, 22)),
-		panelBrush:          createSolidBrush(win.RGB(19, 23, 31)),
-		headerBrush:         createSolidBrush(win.RGB(16, 19, 26)),
-		editBrush:           createSolidBrush(win.RGB(24, 29, 38)),
-		accentBrush:         createSolidBrush(win.RGB(74, 88, 104)),
-		buttonBrush:         createSolidBrush(win.RGB(34, 40, 52)),
-		buttonPrimaryBrush:  createSolidBrush(win.RGB(62, 78, 96)),
-		buttonDisabledBrush: createSolidBrush(win.RGB(43, 47, 55)),
-		statusText:          "\u51c6\u5907\u5c31\u7eea",
-		configPath:          configPath,
+		bgBrush:     createSolidBrush(win.RGB(30, 30, 30)),
+		panelBrush:  createSolidBrush(win.RGB(37, 37, 38)),
+		headerBrush: createSolidBrush(win.RGB(45, 45, 48)),
+		editBrush:   createSolidBrush(win.RGB(30, 30, 30)),
+		accentBrush: createSolidBrush(win.RGB(14, 99, 156)),
+		statusText:  "\u51c6\u5907\u5c31\u7eea",
+		configPath:  configPath,
 	}
 }
 
@@ -247,6 +290,20 @@ func registerClass(instance win.HINSTANCE) error {
 	wc.LpszClassName = syscall.StringToUTF16Ptr(windowClassName)
 	if win.RegisterClassEx(&wc) == 0 {
 		return fmt.Errorf("register window class failed")
+	}
+	return registerButtonClass(instance)
+}
+
+func registerButtonClass(instance win.HINSTANCE) error {
+	var wc win.WNDCLASSEX
+	wc.CbSize = uint32(unsafe.Sizeof(wc))
+	wc.LpfnWndProc = syscall.NewCallback(buttonWndProc)
+	wc.HInstance = instance
+	wc.HCursor = win.LoadCursor(0, win.MAKEINTRESOURCE(win.IDC_HAND))
+	wc.HbrBackground = 0
+	wc.LpszClassName = syscall.StringToUTF16Ptr(buttonClassName)
+	if win.RegisterClassEx(&wc) == 0 {
+		return fmt.Errorf("register button class failed")
 	}
 	return nil
 }
@@ -266,11 +323,6 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 			state.handleCommand(win.LOWORD(uint32(wParam)))
 		}
 		return 0
-	case win.WM_DRAWITEM:
-		if state != nil {
-			return state.drawButton((*win.DRAWITEMSTRUCT)(unsafe.Pointer(lParam)))
-		}
-		return 0
 	case msgLogUpdate:
 		if state != nil {
 			state.refreshLog()
@@ -281,30 +333,45 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 			state.finishRun()
 		}
 		return 0
+	case msgSummaryReady:
+		if state != nil {
+			state.applySummaryResult()
+		}
+		return 0
+	case msgControlDone:
+		if state != nil {
+			state.finishControlAction()
+		}
+		return 0
 	case win.WM_TIMER:
-		if state != nil && wParam == autoSaveTimerID {
-			state.handleConfigSaveResult(state.saveCurrentConfig())
+		if state != nil {
+			switch wParam {
+			case autoSaveTimerID:
+				state.handleConfigSaveResult(state.saveCurrentConfig())
+			case uiRefreshTimerID:
+				state.refreshLog()
+			}
 		}
 		return 0
 	case win.WM_CTLCOLORSTATIC:
 		if state != nil {
 			hdc := win.HDC(wParam)
 			win.SetBkMode(hdc, win.TRANSPARENT)
-			win.SetTextColor(hdc, win.RGB(226, 232, 239))
+			win.SetTextColor(hdc, win.RGB(204, 204, 204))
 			return uintptr(state.panelBrush)
 		}
 	case win.WM_CTLCOLORLISTBOX:
 		if state != nil {
 			hdc := win.HDC(wParam)
-			win.SetBkColor(hdc, win.RGB(24, 29, 38))
-			win.SetTextColor(hdc, win.RGB(236, 239, 244))
+			win.SetBkColor(hdc, win.RGB(30, 30, 30))
+			win.SetTextColor(hdc, win.RGB(212, 212, 212))
 			return uintptr(state.editBrush)
 		}
 	case win.WM_CTLCOLOREDIT:
 		if state != nil {
 			hdc := win.HDC(wParam)
-			win.SetBkColor(hdc, win.RGB(24, 29, 38))
-			win.SetTextColor(hdc, win.RGB(236, 239, 244))
+			win.SetBkColor(hdc, win.RGB(30, 30, 30))
+			win.SetTextColor(hdc, win.RGB(212, 212, 212))
 			return uintptr(state.editBrush)
 		}
 	case win.WM_ERASEBKGND:
@@ -334,6 +401,7 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 	case win.WM_DESTROY:
 		if state != nil {
 			win.KillTimer(hwnd, autoSaveTimerID)
+			win.KillTimer(hwnd, uiRefreshTimerID)
 			state.destroyResources()
 		}
 		win.PostQuitMessage(0)
@@ -343,27 +411,120 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 	return win.DefWindowProc(hwnd, msg, wParam, lParam)
 }
 
+func buttonWndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+	state, ok := loadButtonState(hwnd)
+	switch msg {
+	case win.WM_MOUSEMOVE:
+		if ok && !state.hovered {
+			state.hovered = true
+			trackButtonMouseLeave(hwnd, state)
+			win.InvalidateRect(hwnd, nil, true)
+		}
+		return 0
+	case win.WM_MOUSELEAVE:
+		if ok {
+			state.hovered = false
+			state.tracking = false
+			win.InvalidateRect(hwnd, nil, true)
+		}
+		return 0
+	case win.WM_LBUTTONDOWN:
+		if ok && win.IsWindowEnabled(hwnd) {
+			state.pressed = true
+			win.SetCapture(hwnd)
+			win.SetFocus(hwnd)
+			win.InvalidateRect(hwnd, nil, true)
+		}
+		return 0
+	case win.WM_LBUTTONUP:
+		if ok && state.pressed {
+			state.pressed = false
+			win.ReleaseCapture()
+			win.InvalidateRect(hwnd, nil, true)
+			if win.IsWindowEnabled(hwnd) && pointInClientRect(hwnd, lParam) {
+				parent := win.GetParent(hwnd)
+				if parent != 0 {
+					id := uintptr(win.GetWindowLongPtr(hwnd, win.GWLP_ID))
+					win.PostMessage(parent, win.WM_COMMAND, id, uintptr(hwnd))
+				}
+			}
+		}
+		return 0
+	case win.WM_CAPTURECHANGED:
+		if ok && state.pressed {
+			state.pressed = false
+			win.InvalidateRect(hwnd, nil, true)
+		}
+		return 0
+	case win.WM_ENABLE, win.WM_SETTEXT, win.WM_SETFOCUS, win.WM_KILLFOCUS:
+		result := win.DefWindowProc(hwnd, msg, wParam, lParam)
+		win.InvalidateRect(hwnd, nil, true)
+		return result
+	case win.WM_KEYDOWN:
+		if !win.IsWindowEnabled(hwnd) {
+			return 0
+		}
+		switch wParam {
+		case win.VK_SPACE, win.VK_RETURN:
+			if ok && !state.pressed {
+				state.pressed = true
+				win.InvalidateRect(hwnd, nil, true)
+			}
+			return 0
+		}
+	case win.WM_KEYUP:
+		if !win.IsWindowEnabled(hwnd) {
+			return 0
+		}
+		switch wParam {
+		case win.VK_SPACE, win.VK_RETURN:
+			if ok {
+				state.pressed = false
+				win.InvalidateRect(hwnd, nil, true)
+			}
+			parent := win.GetParent(hwnd)
+			if parent != 0 {
+				id := uintptr(win.GetWindowLongPtr(hwnd, win.GWLP_ID))
+				win.PostMessage(parent, win.WM_COMMAND, id, uintptr(hwnd))
+			}
+			return 0
+		}
+	case win.WM_GETDLGCODE:
+		return win.DLGC_BUTTON
+	case win.WM_ERASEBKGND:
+		return 1
+	case win.WM_PAINT:
+		paintThemedButton(hwnd, state)
+		return 0
+	case win.WM_NCDESTROY:
+		deleteButtonState(hwnd)
+	}
+
+	return win.DefWindowProc(hwnd, msg, wParam, lParam)
+}
+
 func (s *uiState) initControls() {
 	s.fontNormal = createFont(18, 400, "Segoe UI")
 	s.fontTitle = createFont(32, 700, "Segoe UI Semibold")
+	s.fontMono = createFont(17, 400, "Consolas")
 	defaultCfg := appcore.DefaultConfig(preferredWorkDir(currentWorkingDir()))
 	saved := s.loadSavedConfig(defaultCfg)
 	workDir := saved.WorkDir
 	outputDir := saved.OutputDir
 	createLabel(s.hwnd, "\u89c6\u9891\u76ee\u5f55", 28, 118, 140, 24, s.fontNormal)
 	s.workDirEdit = createEdit(s.hwnd, idWorkDirEdit, workDir, 28, 146, 360, 30)
-	createButton(s.hwnd, idWorkDirBrowse, "\u6d4f\u89c8\u76ee\u5f55", 398, 146, 104, 30)
-	createLabel(s.hwnd, "\u8f93\u51fa\u76ee\u5f55", 28, 190, 140, 24, s.fontNormal)
+	createButton(s.hwnd, idWorkDirBrowse, "\u6d4f\u89c8\u76ee\u5f55", 398, 146, 104, 30, buttonVariantSecondary)
+	createLabel(s.hwnd, "\u6839\u76ee\u5f55\u8f93\u51fa", 28, 190, 160, 24, s.fontNormal)
 	s.outputDirEdit = createEdit(s.hwnd, idOutputDirEdit, outputDir, 28, 218, 360, 30)
-	createButton(s.hwnd, idOutputDirBrowse, "\u6d4f\u89c8\u76ee\u5f55", 398, 218, 104, 30)
+	createButton(s.hwnd, idOutputDirBrowse, "\u6d4f\u89c8\u76ee\u5f55", 398, 218, 104, 30, buttonVariantSecondary)
 	createLabel(s.hwnd, "FFmpeg", 28, 262, 100, 24, s.fontNormal)
 	s.ffmpegEdit = createEdit(s.hwnd, idFFmpegEdit, saved.FFmpegPath, 28, 290, 360, 30)
-	createButton(s.hwnd, idFFmpegBrowse, "\u9009\u62e9\u6587\u4ef6", 398, 290, 104, 30)
+	createButton(s.hwnd, idFFmpegBrowse, "\u9009\u62e9\u6587\u4ef6", 398, 290, 104, 30, buttonVariantSecondary)
 	createLabel(s.hwnd, "FFprobe", 28, 334, 100, 24, s.fontNormal)
 	s.ffprobeEdit = createEdit(s.hwnd, idFFprobeEdit, saved.FFprobePath, 28, 362, 360, 30)
-	createButton(s.hwnd, idFFprobeBrowse, "\u9009\u62e9\u6587\u4ef6", 398, 362, 104, 30)
-	createButton(s.hwnd, idUseCFFmpeg, "\u4f7f\u7528 C:\\ffmpeg", 28, 406, 160, 32)
-	createButton(s.hwnd, idScan, "\u626b\u63cf\u73af\u5883", 198, 406, 120, 32)
+	createButton(s.hwnd, idFFprobeBrowse, "\u9009\u62e9\u6587\u4ef6", 398, 362, 104, 30, buttonVariantSecondary)
+	createButton(s.hwnd, idUseCFFmpeg, "\u4f7f\u7528 C:\\ffmpeg", 28, 406, 160, 32, buttonVariantSecondary)
+	createButton(s.hwnd, idScan, "\u626b\u63cf\u73af\u5883", 198, 406, 120, 32, buttonVariantSecondary)
 	createLabel(s.hwnd, "\u7f16\u7801\u5668", 28, 462, 100, 24, s.fontNormal)
 	s.encoderCombo = createComboBox(s.hwnd, idEncoderCombo, 28, 490, 150, 240)
 	addComboItems(s.encoderCombo, []string{"h264_nvenc", "libx264", "\u81ea\u52a8"})
@@ -376,14 +537,16 @@ func (s *uiState) initControls() {
 	s.blurEdit = createEdit(s.hwnd, idBlurEdit, strconv.Itoa(saved.BlurSigma), 388, 490, 90, 30)
 	createLabel(s.hwnd, "\u7fbd\u5316\u50cf\u7d20", 28, 534, 120, 24, s.fontNormal)
 	s.featherEdit = createEdit(s.hwnd, idFeatherEdit, strconv.Itoa(saved.FeatherPx), 28, 562, 90, 30)
-	s.runButton = createButton(s.hwnd, idRun, "\u5f00\u59cb\u5904\u7406", 28, 614, 140, 42)
-	s.pauseButton = createButton(s.hwnd, idPause, "\u6682\u505c\u5904\u7406", 178, 614, 120, 42)
-	s.stopButton = createButton(s.hwnd, idStop, "\u505c\u6b62\u5904\u7406", 308, 614, 116, 42)
-	createButton(s.hwnd, idOpenOutput, "\u6253\u5f00\u8f93\u51fa\u76ee\u5f55", 28, 664, 220, 38)
+	s.runButton = createButton(s.hwnd, idRun, "\u5f00\u59cb\u5904\u7406", 28, 614, 140, 42, buttonVariantPrimary)
+	s.pauseButton = createButton(s.hwnd, idPause, "\u6682\u505c\u5904\u7406", 178, 614, 120, 42, buttonVariantSecondary)
+	s.stopButton = createButton(s.hwnd, idStop, "\u505c\u6b62\u5904\u7406", 308, 614, 116, 42, buttonVariantDanger)
+	createButton(s.hwnd, idOpenOutput, "\u6253\u5f00\u6839\u76ee\u5f55\u8f93\u51fa", 28, 664, 220, 38, buttonVariantSecondary)
 	createLabel(s.hwnd, "\u8fd0\u884c\u72b6\u6001", 28, 716, 100, 24, s.fontNormal)
 	s.statusStatic = createLabel(s.hwnd, s.statusText, 28, 744, 474, 48, s.fontNormal)
 	s.progressBar = createProgressBar(s.hwnd, idProgressBar, 28, 802, 474, 24)
 	win.SendMessage(s.progressBar, win.PBM_SETRANGE32, 0, 1000)
+	win.SendMessage(s.progressBar, win.PBM_SETBARCOLOR, 0, uintptr(win.RGB(14, 99, 156)))
+	win.SendMessage(s.progressBar, win.PBM_SETBKCOLOR, 0, uintptr(win.RGB(45, 45, 48)))
 	win.ShowWindow(s.progressBar, win.SW_HIDE)
 	win.EnableWindow(s.pauseButton, false)
 	win.EnableWindow(s.stopButton, false)
@@ -391,7 +554,9 @@ func (s *uiState) initControls() {
 	s.summaryEdit = createReadOnlyEdit(s.hwnd, idSummaryEdit, "", 540, 146, 736, 176)
 	createLabel(s.hwnd, "\u8fd0\u884c\u65e5\u5fd7", 540, 350, 100, 24, s.fontNormal)
 	s.logEdit = createLogListBox(s.hwnd, idLogEdit, 540, 378, 736, 424)
+	applyFont(s.logEdit, s.fontMono)
 	win.SetTimer(s.hwnd, autoSaveTimerID, autoSaveIntervalMilli, 0)
+	win.SetTimer(s.hwnd, uiRefreshTimerID, uiRefreshIntervalMilli, 0)
 }
 func (s *uiState) handleCommand(id uint16) {
 	switch int(id) {
@@ -401,36 +566,35 @@ func (s *uiState) handleCommand(id uint16) {
 			if strings.TrimSpace(getWindowText(s.outputDirEdit)) == "" {
 				setWindowText(s.outputDirEdit, filepath.Join(selected, "output-gui"))
 			}
-			s.updateSummary()
+			s.requestSummaryRefresh(false)
 		}
 	case idOutputDirBrowse:
 		if selected, ok := chooseFolder(getWindowText(s.outputDirEdit)); ok {
 			setWindowText(s.outputDirEdit, selected)
-			s.updateSummary()
+			s.requestSummaryRefresh(false)
 		}
 	case idFFmpegBrowse:
 		if selected, ok := chooseFile(getWindowText(s.ffmpegEdit), "ffmpeg.exe|ffmpeg.exe|\u6240\u6709\u6587\u4ef6|*.*"); ok {
 			setWindowText(s.ffmpegEdit, selected)
-			s.updateSummary()
+			s.requestSummaryRefresh(false)
 		}
 	case idFFprobeBrowse:
 		if selected, ok := chooseFile(getWindowText(s.ffprobeEdit), "ffprobe.exe|ffprobe.exe|\u6240\u6709\u6587\u4ef6|*.*"); ok {
 			setWindowText(s.ffprobeEdit, selected)
-			s.updateSummary()
+			s.requestSummaryRefresh(false)
 		}
 	case idUseCFFmpeg:
 		setWindowText(s.ffmpegEdit, "C:\\ffmpeg\\bin\\ffmpeg.exe")
 		setWindowText(s.ffprobeEdit, "C:\\ffmpeg\\bin\\ffprobe.exe")
-		s.updateSummary()
+		s.requestSummaryRefresh(false)
 	case idScan:
-		s.updateSummary()
-		messageBox(s.hwnd, "\u626b\u63cf\u5b8c\u6210", s.summary, win.MB_ICONINFORMATION)
+		s.requestSummaryRefresh(true)
 	case idEncoderCombo, idBlackModeCombo:
-		s.updateSummary()
+		s.requestSummaryRefresh(false)
 	case idOpenOutput:
 		outputDir := strings.TrimSpace(getWindowText(s.outputDirEdit))
 		if outputDir == "" {
-			messageBox(s.hwnd, "\u63d0\u793a", "\u8f93\u51fa\u76ee\u5f55\u4e0d\u80fd\u4e3a\u7a7a\u3002", win.MB_ICONINFORMATION)
+			messageBox(s.hwnd, "\u63d0\u793a", "\u6839\u76ee\u5f55\u8f93\u51fa\u4e0d\u80fd\u4e3a\u7a7a\u3002", win.MB_ICONINFORMATION)
 			return
 		}
 		if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -474,10 +638,11 @@ func (s *uiState) startRun() {
 	s.runStopped = false
 	s.runErr = nil
 	s.controller = controller
+	s.controlBusy = false
 	s.statusText = "\u5f00\u59cb\u5904\u7406"
 	s.progress = 0
 	s.logLines = nil
-	s.refreshPending = false
+	s.refreshPending = true
 	s.mu.Unlock()
 	s.refreshButtons()
 	win.ShowWindow(s.progressBar, win.SW_SHOW)
@@ -494,6 +659,7 @@ func (s *uiState) startRun() {
 		s.stopping = false
 		s.runErr = err
 		s.controller = nil
+		s.controlBusy = false
 		if errors.Is(err, appcore.ErrStopped) {
 			s.runStopped = true
 			s.statusText = "\u5904\u7406\u5df2\u505c\u6b62"
@@ -513,44 +679,44 @@ func (s *uiState) startRun() {
 
 func (s *uiState) togglePause() {
 	s.mu.Lock()
-	if !s.running || s.controller == nil || s.stopping {
+	if !s.running || s.controller == nil || s.stopping || s.controlBusy {
 		s.mu.Unlock()
 		return
 	}
 	controller := s.controller
 	nextPaused := !s.paused
-	s.mu.Unlock()
-
-	if err := controller.SetPaused(nextPaused); err != nil {
-		if !errors.Is(err, appcore.ErrStopped) {
-			messageBox(s.hwnd, "\u64cd\u4f5c\u5931\u8d25", err.Error(), win.MB_ICONERROR)
-		}
-		return
-	}
-
-	s.mu.Lock()
-	s.paused = nextPaused
+	s.controlBusy = true
 	if nextPaused {
-		s.statusText = "\u5904\u7406\u5df2\u6682\u505c"
-		s.prependLogLocked("\u7528\u6237\u5df2\u6682\u505c\u5f53\u524d\u4efb\u52a1\u3002")
+		s.statusText = "\u6b63\u5728\u6682\u505c"
 	} else {
-		s.statusText = "\u7ee7\u7eed\u5904\u7406"
-		s.prependLogLocked("\u7528\u6237\u5df2\u7ee7\u7eed\u5f53\u524d\u4efb\u52a1\u3002")
+		s.statusText = "\u6b63\u5728\u7ee7\u7eed"
 	}
 	s.requestRefreshLocked()
 	s.mu.Unlock()
 
 	s.refreshButtons()
+	go func() {
+		err := controller.SetPaused(nextPaused)
+		s.mu.Lock()
+		s.controlResult = controlResult{
+			action: "pause",
+			paused: nextPaused,
+			err:    err,
+		}
+		s.mu.Unlock()
+		win.PostMessage(s.hwnd, msgControlDone, 0, 0)
+	}()
 }
 
 func (s *uiState) stopRun() {
 	s.mu.Lock()
-	if !s.running || s.controller == nil || s.stopping {
+	if !s.running || s.controller == nil || s.stopping || s.controlBusy {
 		s.mu.Unlock()
 		return
 	}
 	controller := s.controller
 	s.stopping = true
+	s.controlBusy = true
 	s.paused = false
 	s.statusText = "\u6b63\u5728\u505c\u6b62"
 	s.prependLogLocked("\u7528\u6237\u53d1\u51fa\u505c\u6b62\u8bf7\u6c42\u3002")
@@ -558,14 +724,16 @@ func (s *uiState) stopRun() {
 	s.mu.Unlock()
 
 	s.refreshButtons()
-	if err := controller.RequestStop(); err != nil {
+	go func() {
+		err := controller.RequestStop()
 		s.mu.Lock()
-		s.stopping = false
-		s.requestRefreshLocked()
+		s.controlResult = controlResult{
+			action: "stop",
+			err:    err,
+		}
 		s.mu.Unlock()
-		s.refreshButtons()
-		messageBox(s.hwnd, "\u64cd\u4f5c\u5931\u8d25", err.Error(), win.MB_ICONERROR)
-	}
+		win.PostMessage(s.hwnd, msgControlDone, 0, 0)
+	}()
 }
 
 func (s *uiState) finishRun() {
@@ -584,6 +752,52 @@ func (s *uiState) finishRun() {
 	win.SendMessage(s.progressBar, win.PBM_SETPOS, 1000, 0)
 	messageBox(s.hwnd, "\u5b8c\u6210", "\u6240\u6709\u4efb\u52a1\u5df2\u7ecf\u5904\u7406\u5b8c\u6210\u3002", win.MB_ICONINFORMATION)
 }
+
+func (s *uiState) finishControlAction() {
+	s.mu.Lock()
+	result := s.controlResult
+	s.controlResult = controlResult{}
+	s.controlBusy = false
+
+	switch result.action {
+	case "pause":
+		if result.err == nil {
+			s.paused = result.paused
+			if result.paused {
+				s.statusText = "\u5904\u7406\u5df2\u6682\u505c"
+				s.prependLogLocked("\u7528\u6237\u5df2\u6682\u505c\u5f53\u524d\u4efb\u52a1\u3002")
+			} else {
+				s.statusText = "\u7ee7\u7eed\u5904\u7406"
+				s.prependLogLocked("\u7528\u6237\u5df2\u7ee7\u7eed\u5f53\u524d\u4efb\u52a1\u3002")
+			}
+			s.requestRefreshLocked()
+		} else if !errors.Is(result.err, appcore.ErrStopped) {
+			s.statusText = "\u64cd\u4f5c\u5931\u8d25"
+			s.requestRefreshLocked()
+		}
+	case "stop":
+		if result.err != nil {
+			s.stopping = false
+			s.statusText = "\u505c\u6b62\u5931\u8d25"
+			s.requestRefreshLocked()
+		}
+	}
+	s.mu.Unlock()
+
+	s.refreshButtons()
+
+	switch result.action {
+	case "pause":
+		if result.err != nil && !errors.Is(result.err, appcore.ErrStopped) {
+			messageBox(s.hwnd, "\u64cd\u4f5c\u5931\u8d25", result.err.Error(), win.MB_ICONERROR)
+		}
+	case "stop":
+		if result.err != nil {
+			messageBox(s.hwnd, "\u64cd\u4f5c\u5931\u8d25", result.err.Error(), win.MB_ICONERROR)
+		}
+	}
+}
+
 func (s *uiState) readConfig() (appcore.Config, error) {
 	workDir := strings.TrimSpace(getWindowText(s.workDirEdit))
 	outputDir := strings.TrimSpace(getWindowText(s.outputDirEdit))
@@ -593,7 +807,7 @@ func (s *uiState) readConfig() (appcore.Config, error) {
 		return appcore.Config{}, fmt.Errorf("\u89c6\u9891\u76ee\u5f55\u4e0d\u80fd\u4e3a\u7a7a")
 	}
 	if outputDir == "" {
-		return appcore.Config{}, fmt.Errorf("\u8f93\u51fa\u76ee\u5f55\u4e0d\u80fd\u4e3a\u7a7a")
+		return appcore.Config{}, fmt.Errorf("\u6839\u76ee\u5f55\u8f93\u51fa\u4e0d\u80fd\u4e3a\u7a7a")
 	}
 	cfg := appcore.DefaultConfig(workDir)
 	cfg.WorkDir = workDir
@@ -619,19 +833,82 @@ func (s *uiState) readConfig() (appcore.Config, error) {
 	cfg.BlackBorderMode = getComboSelection(s.blackModeCombo)
 	return cfg, nil
 }
-func (s *uiState) updateSummary() {
-	workDir := strings.TrimSpace(getWindowText(s.workDirEdit))
-	outputDir := strings.TrimSpace(getWindowText(s.outputDirEdit))
-	videos, videoErr := ffmpeg.FindVideos(workDir)
-	bins, binErr := ffmpeg.Locate(workDir, ffmpeg.Binaries{
-		FFmpeg:  strings.TrimSpace(getWindowText(s.ffmpegEdit)),
-		FFprobe: strings.TrimSpace(getWindowText(s.ffprobeEdit)),
+func (s *uiState) requestSummaryRefresh(showCompletion bool) {
+	if s == nil || s.hwnd == 0 {
+		return
+	}
+
+	snapshot := s.captureSummarySnapshot()
+
+	s.mu.Lock()
+	s.summarySeq++
+	seq := s.summarySeq
+	s.summary = "\u6b63\u5728\u626b\u63cf\u89c6\u9891\u548c\u7ec4\u4ef6..."
+	s.mu.Unlock()
+	setWindowText(s.summaryEdit, "\u6b63\u5728\u626b\u63cf\u89c6\u9891\u548c\u7ec4\u4ef6...")
+
+	go func() {
+		text := buildSummary(snapshot)
+		s.mu.Lock()
+		if seq != s.summarySeq {
+			s.mu.Unlock()
+			return
+		}
+		s.summaryResult = summaryResult{
+			seq:            seq,
+			text:           text,
+			showCompletion: showCompletion,
+		}
+		s.mu.Unlock()
+		win.PostMessage(s.hwnd, msgSummaryReady, 0, 0)
+	}()
+}
+
+func (s *uiState) applySummaryResult() {
+	s.mu.Lock()
+	result := s.summaryResult
+	if result.seq != s.summarySeq || result.text == "" {
+		s.mu.Unlock()
+		return
+	}
+	s.summary = result.text
+	s.summaryResult = summaryResult{}
+	s.mu.Unlock()
+
+	setWindowText(s.summaryEdit, result.text)
+	if result.showCompletion {
+		messageBox(s.hwnd, "\u626b\u63cf\u5b8c\u6210", result.text, win.MB_ICONINFORMATION)
+	}
+}
+
+func (s *uiState) captureSummarySnapshot() summarySnapshot {
+	return summarySnapshot{
+		workDir:     strings.TrimSpace(getWindowText(s.workDirEdit)),
+		outputDir:   strings.TrimSpace(getWindowText(s.outputDirEdit)),
+		ffmpegPath:  strings.TrimSpace(getWindowText(s.ffmpegEdit)),
+		ffprobePath: strings.TrimSpace(getWindowText(s.ffprobeEdit)),
+		encoder:     getComboSelection(s.encoderCombo),
+		blackMode:   getComboSelection(s.blackModeCombo),
+	}
+}
+
+func buildSummary(snapshot summarySnapshot) string {
+	discoveryCfg := appcore.DefaultConfig(snapshot.workDir)
+	discoveryCfg.OutputDir = snapshot.outputDir
+	videos, videoErr := appcore.DiscoverVideos(discoveryCfg)
+	bins, binErr := ffmpeg.Locate(snapshot.workDir, ffmpeg.Binaries{
+		FFmpeg:  snapshot.ffmpegPath,
+		FFprobe: snapshot.ffprobePath,
 	})
+
 	lines := []string{}
 	if videoErr != nil {
 		lines = append(lines, "\u89c6\u9891\u626b\u63cf\u5931\u8d25: "+videoErr.Error())
 	} else {
 		lines = append(lines, fmt.Sprintf("\u68c0\u6d4b\u5230 %d \u4e2a\u89c6\u9891\u6587\u4ef6", len(videos)))
+		rootVideos, nestedVideos := countDiscoveredVideos(snapshot.workDir, videos)
+		lines = append(lines, fmt.Sprintf("\u6839\u76ee\u5f55\u89c6\u9891: %d \u4e2a", rootVideos))
+		lines = append(lines, fmt.Sprintf("\u5b50\u76ee\u5f55\u89c6\u9891: %d \u4e2a", nestedVideos))
 	}
 	if binErr != nil {
 		lines = append(lines, "\u7ec4\u4ef6\u5b9a\u4f4d\u5931\u8d25: "+binErr.Error())
@@ -640,14 +917,12 @@ func (s *uiState) updateSummary() {
 		lines = append(lines, "FFprobe: "+bins.FFprobe)
 		lines = append(lines, "\u6765\u6e90: "+bins.Source)
 	}
-	lines = append(lines, "\u8f93\u51fa\u76ee\u5f55: "+outputDir)
-	lines = append(lines, "\u7f16\u7801\u7b56\u7565: "+getComboSelection(s.encoderCombo))
-	lines = append(lines, "\u53bb\u9ed1\u8fb9\u65b9\u5f0f: "+getComboSelection(s.blackModeCombo))
+	lines = append(lines, "\u6839\u76ee\u5f55\u89c6\u9891\u8f93\u51fa: "+snapshot.outputDir+"\\<\u6bd4\u4f8b\u540d>")
+	lines = append(lines, "\u5b50\u76ee\u5f55\u89c6\u9891\u8f93\u51fa: \u89c6\u9891\u6240\u5728\u76ee\u5f55\\<\u6bd4\u4f8b\u540d>")
+	lines = append(lines, "\u7f16\u7801\u7b56\u7565: "+snapshot.encoder)
+	lines = append(lines, "\u53bb\u9ed1\u8fb9\u65b9\u5f0f: "+snapshot.blackMode)
 	lines = append(lines, "\u8bf4\u660e: \u5141\u8bb8\u8bfb\u53d6 C:\\ffmpeg\uff0c\u4f46\u4e0d\u4f1a\u628a\u8f93\u51fa\u5199\u5165 C \u76d8\u3002")
-	s.mu.Lock()
-	s.summary = strings.Join(lines, "\r\n")
-	s.mu.Unlock()
-	setWindowText(s.summaryEdit, s.summary)
+	return strings.Join(lines, "\r\n")
 }
 func (s *uiState) prependLogLocked(line string) {
 	if line == "" {
@@ -665,11 +940,10 @@ func (s *uiState) prependLogLocked(line string) {
 	}
 }
 func (s *uiState) requestRefreshLocked() {
-	if s.refreshPending || s.hwnd == 0 {
+	if s.hwnd == 0 {
 		return
 	}
 	s.refreshPending = true
-	win.PostMessage(s.hwnd, msgLogUpdate, 0, 0)
 }
 func (s *uiState) applyProgress(update appcore.ProgressUpdate) {
 	progress := int(update.Percent * 10)
@@ -728,6 +1002,10 @@ func (s *uiState) appendLog(line string) {
 }
 func (s *uiState) refreshLog() {
 	s.mu.Lock()
+	if !s.refreshPending {
+		s.mu.Unlock()
+		return
+	}
 	s.refreshPending = false
 	logText := strings.Join(s.logLines, "\n")
 	logLines := append([]string(nil), s.logLines...)
@@ -753,11 +1031,12 @@ func (s *uiState) refreshButtons() {
 	running := s.running
 	paused := s.paused
 	stopping := s.stopping
+	controlBusy := s.controlBusy
 	s.mu.Unlock()
 
 	win.EnableWindow(s.runButton, !running)
-	win.EnableWindow(s.pauseButton, running && !stopping)
-	win.EnableWindow(s.stopButton, running && !stopping)
+	win.EnableWindow(s.pauseButton, running && !stopping && !controlBusy)
+	win.EnableWindow(s.stopButton, running && !stopping && !controlBusy)
 	if paused {
 		setWindowText(s.pauseButton, "\u7ee7\u7eed\u5904\u7406")
 	} else {
@@ -776,14 +1055,12 @@ func (s *uiState) destroyResources() {
 	}
 	deleteGDIObject(&s.fontNormal)
 	deleteGDIObject(&s.fontTitle)
+	deleteGDIObject(&s.fontMono)
 	deleteGDIObject(&s.bgBrush)
 	deleteGDIObject(&s.panelBrush)
 	deleteGDIObject(&s.headerBrush)
 	deleteGDIObject(&s.editBrush)
 	deleteGDIObject(&s.accentBrush)
-	deleteGDIObject(&s.buttonBrush)
-	deleteGDIObject(&s.buttonPrimaryBrush)
-	deleteGDIObject(&s.buttonDisabledBrush)
 }
 
 func (s *uiState) paintBackground(hdc win.HDC) {
@@ -802,76 +1079,20 @@ func (s *uiState) paintWindow() {
 	fillRect(hdc, s.headerBrush, 0, 0, rect.Right, 92)
 	fillRect(hdc, s.accentBrush, 0, 88, rect.Right, 92)
 	oldFont := win.SelectObject(hdc, win.HGDIOBJ(s.fontTitle))
-	oldColor := win.SetTextColor(hdc, win.RGB(245, 247, 250))
+	oldColor := win.SetTextColor(hdc, win.RGB(255, 255, 255))
 	oldMode := win.SetBkMode(hdc, win.TRANSPARENT)
 	titleRect := win.RECT{Left: 28, Top: 18, Right: 600, Bottom: 62}
 	drawText(hdc, "OneKeyVE", &titleRect, win.DT_LEFT|win.DT_VCENTER|win.DT_SINGLELINE)
 	win.SelectObject(hdc, oldFont)
 	win.SelectObject(hdc, win.HGDIOBJ(s.fontNormal))
-	win.SetTextColor(hdc, win.RGB(170, 180, 194))
+	win.SetTextColor(hdc, win.RGB(156, 163, 175))
 	subRect := win.RECT{Left: 30, Top: 56, Right: 560, Bottom: 80}
 	drawText(hdc, "\u89c6\u9891\u6279\u5904\u7406\u684c\u9762\u7248", &subRect, win.DT_LEFT|win.DT_VCENTER|win.DT_SINGLELINE)
-	win.SetTextColor(hdc, win.RGB(203, 210, 220))
+	win.SetTextColor(hdc, win.RGB(181, 181, 181))
 	rightRect := win.RECT{Left: rect.Right - 420, Top: 38, Right: rect.Right - 30, Bottom: 70}
 	drawText(hdc, "\u6df1\u8272\u754c\u9762 \u00b7 \u5b9e\u65f6\u65e5\u5fd7 \u00b7 \u76ee\u5f55\u76f4\u8fbe", &rightRect, win.DT_RIGHT|win.DT_VCENTER|win.DT_SINGLELINE)
 	win.SetTextColor(hdc, oldColor)
 	win.SetBkMode(hdc, oldMode)
-}
-
-func (s *uiState) drawButton(dis *win.DRAWITEMSTRUCT) uintptr {
-	if dis == nil || dis.CtlType != odtButton {
-		return 0
-	}
-
-	rect := dis.RcItem
-	brush := s.buttonBrush
-	textColor := win.RGB(226, 232, 239)
-	borderColor := win.RGB(70, 80, 94)
-
-	if dis.CtlID == idRun {
-		brush = s.buttonPrimaryBrush
-		textColor = win.RGB(246, 248, 250)
-		borderColor = win.RGB(96, 110, 126)
-	}
-	if dis.ItemState&win.ODS_DISABLED != 0 {
-		brush = s.buttonDisabledBrush
-		textColor = win.RGB(152, 160, 171)
-		borderColor = win.RGB(58, 64, 74)
-	}
-
-	fillRect(dis.HDC, brush, rect.Left, rect.Top, rect.Right, rect.Bottom)
-	drawRectBorder(dis.HDC, rect, borderColor)
-
-	if dis.ItemState&win.ODS_SELECTED != 0 {
-		pressedRect := rect
-		pressedRect.Left++
-		pressedRect.Top++
-		pressedRect.Right--
-		pressedRect.Bottom--
-		drawRectBorder(dis.HDC, pressedRect, win.RGB(24, 28, 35))
-	}
-
-	oldMode := win.SetBkMode(dis.HDC, win.TRANSPARENT)
-	oldColor := win.SetTextColor(dis.HDC, textColor)
-	textRect := rect
-	if dis.ItemState&win.ODS_SELECTED != 0 {
-		textRect.Left++
-		textRect.Top++
-	}
-	drawText(dis.HDC, getWindowText(dis.HwndItem), &textRect, win.DT_CENTER|win.DT_VCENTER|win.DT_SINGLELINE)
-	win.SetTextColor(dis.HDC, oldColor)
-	win.SetBkMode(dis.HDC, oldMode)
-
-	if dis.ItemState&win.ODS_FOCUS != 0 {
-		focusRect := rect
-		focusRect.Left += 4
-		focusRect.Top += 4
-		focusRect.Right -= 4
-		focusRect.Bottom -= 4
-		win.DrawFocusRect(dis.HDC, &focusRect)
-	}
-
-	return 1
 }
 
 func createLabel(parent win.HWND, text string, x, y, w, h int32, font win.HFONT) win.HWND {
@@ -890,18 +1111,19 @@ func createLabel(parent win.HWND, text string, x, y, w, h int32, font win.HFONT)
 	return hwnd
 }
 
-func createButton(parent win.HWND, id int, text string, x, y, w, h int32) win.HWND {
+func createButton(parent win.HWND, id int, text string, x, y, w, h int32, variant buttonVariant) win.HWND {
 	hwnd := win.CreateWindowEx(
 		0,
-		syscall.StringToUTF16Ptr("BUTTON"),
+		syscall.StringToUTF16Ptr(buttonClassName),
 		syscall.StringToUTF16Ptr(text),
-		win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_OWNERDRAW,
+		win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP,
 		x, y, w, h,
 		parent,
 		win.HMENU(id),
 		0,
 		nil,
 	)
+	storeButtonState(hwnd, &buttonState{variant: variant})
 	applyFont(hwnd, globalState.fontNormal)
 	return hwnd
 }
@@ -918,6 +1140,7 @@ func createEdit(parent win.HWND, id int, text string, x, y, w, h int32) win.HWND
 		0,
 		nil,
 	)
+	applyExplorerTheme(hwnd)
 	applyFont(hwnd, globalState.fontNormal)
 	return hwnd
 }
@@ -934,6 +1157,7 @@ func createReadOnlyEdit(parent win.HWND, id int, text string, x, y, w, h int32) 
 		0,
 		nil,
 	)
+	applyExplorerTheme(hwnd)
 	applyFont(hwnd, globalState.fontNormal)
 	return hwnd
 }
@@ -950,6 +1174,7 @@ func createLogListBox(parent win.HWND, id int, x, y, w, h int32) win.HWND {
 		0,
 		nil,
 	)
+	applyExplorerTheme(hwnd)
 	applyFont(hwnd, globalState.fontNormal)
 	return hwnd
 }
@@ -966,6 +1191,7 @@ func createComboBox(parent win.HWND, id int, x, y, w, h int32) win.HWND {
 		0,
 		nil,
 	)
+	applyExplorerTheme(hwnd)
 	applyFont(hwnd, globalState.fontNormal)
 	return hwnd
 }
@@ -982,6 +1208,141 @@ func createProgressBar(parent win.HWND, id int, x, y, w, h int32) win.HWND {
 		0,
 		nil,
 	)
+}
+
+func applyExplorerTheme(hwnd win.HWND) {
+	if hwnd == 0 {
+		return
+	}
+	win.SetWindowTheme(hwnd, syscall.StringToUTF16Ptr("Explorer"), nil)
+}
+
+func storeButtonState(hwnd win.HWND, state *buttonState) {
+	buttonStatesMu.Lock()
+	defer buttonStatesMu.Unlock()
+	buttonStates[hwnd] = state
+}
+
+func loadButtonState(hwnd win.HWND) (*buttonState, bool) {
+	buttonStatesMu.Lock()
+	defer buttonStatesMu.Unlock()
+	state, ok := buttonStates[hwnd]
+	return state, ok
+}
+
+func deleteButtonState(hwnd win.HWND) {
+	buttonStatesMu.Lock()
+	defer buttonStatesMu.Unlock()
+	delete(buttonStates, hwnd)
+}
+
+func trackButtonMouseLeave(hwnd win.HWND, state *buttonState) {
+	if state == nil || state.tracking {
+		return
+	}
+	var tme win.TRACKMOUSEEVENT
+	tme.CbSize = uint32(unsafe.Sizeof(tme))
+	tme.DwFlags = win.TME_LEAVE
+	tme.HwndTrack = hwnd
+	if win.TrackMouseEvent(&tme) {
+		state.tracking = true
+	}
+}
+
+func pointInClientRect(hwnd win.HWND, lParam uintptr) bool {
+	var rect win.RECT
+	if !win.GetClientRect(hwnd, &rect) {
+		return false
+	}
+	x := int32(int16(uint16(lParam & 0xffff)))
+	y := int32(int16(uint16((lParam >> 16) & 0xffff)))
+	return x >= rect.Left && x < rect.Right && y >= rect.Top && y < rect.Bottom
+}
+
+func paintThemedButton(hwnd win.HWND, state *buttonState) {
+	var ps win.PAINTSTRUCT
+	hdc := win.BeginPaint(hwnd, &ps)
+	defer win.EndPaint(hwnd, &ps)
+
+	var rect win.RECT
+	win.GetClientRect(hwnd, &rect)
+
+	enabled := win.IsWindowEnabled(hwnd)
+	bgColor, borderColor, textColor := themedButtonColors(state, enabled)
+
+	fillSolidRect(hdc, rect, bgColor)
+	drawRectBorder(hdc, rect, borderColor)
+
+	if win.GetFocus() == hwnd {
+		focusRect := rect
+		focusRect.Left += 2
+		focusRect.Top += 2
+		focusRect.Right -= 2
+		focusRect.Bottom -= 2
+		drawRectBorder(hdc, focusRect, win.RGB(55, 148, 255))
+	}
+
+	oldMode := win.SetBkMode(hdc, win.TRANSPARENT)
+	oldColor := win.SetTextColor(hdc, textColor)
+	oldFont := win.SelectObject(hdc, win.HGDIOBJ(globalState.fontNormal))
+
+	textRect := rect
+	if state != nil && state.pressed {
+		textRect.Left++
+		textRect.Top++
+		textRect.Right++
+		textRect.Bottom++
+	}
+	drawText(hdc, getWindowText(hwnd), &textRect, win.DT_CENTER|win.DT_VCENTER|win.DT_SINGLELINE)
+
+	win.SelectObject(hdc, oldFont)
+	win.SetTextColor(hdc, oldColor)
+	win.SetBkMode(hdc, oldMode)
+}
+
+func themedButtonColors(state *buttonState, enabled bool) (bg win.COLORREF, border win.COLORREF, text win.COLORREF) {
+	if !enabled {
+		return win.RGB(58, 58, 58), win.RGB(62, 62, 66), win.RGB(133, 133, 133)
+	}
+
+	variant := buttonVariantSecondary
+	hovered := false
+	pressed := false
+	if state != nil {
+		variant = state.variant
+		hovered = state.hovered
+		pressed = state.pressed
+	}
+
+	switch variant {
+	case buttonVariantPrimary:
+		switch {
+		case pressed:
+			return win.RGB(9, 71, 113), win.RGB(55, 148, 255), win.RGB(255, 255, 255)
+		case hovered:
+			return win.RGB(17, 119, 187), win.RGB(55, 148, 255), win.RGB(255, 255, 255)
+		default:
+			return win.RGB(14, 99, 156), win.RGB(0, 122, 204), win.RGB(255, 255, 255)
+		}
+	case buttonVariantDanger:
+		switch {
+		case pressed:
+			return win.RGB(102, 29, 15), win.RGB(244, 135, 113), win.RGB(255, 255, 255)
+		case hovered:
+			return win.RGB(160, 48, 30), win.RGB(244, 135, 113), win.RGB(255, 255, 255)
+		default:
+			return win.RGB(122, 36, 22), win.RGB(214, 82, 66), win.RGB(255, 255, 255)
+		}
+	default:
+		switch {
+		case pressed:
+			return win.RGB(43, 43, 43), win.RGB(110, 110, 110), win.RGB(220, 220, 220)
+		case hovered:
+			return win.RGB(69, 69, 70), win.RGB(142, 142, 142), win.RGB(255, 255, 255)
+		default:
+			return win.RGB(60, 60, 60), win.RGB(90, 93, 94), win.RGB(204, 204, 204)
+		}
+	}
 }
 
 func addComboItems(hwnd win.HWND, items []string) {
@@ -1211,13 +1572,15 @@ func configFilePath() string {
 func chooseFolder(initial string) (string, bool) {
 	displayName := make([]uint16, win.MAX_PATH)
 	title := syscall.StringToUTF16Ptr("\u9009\u62e9\u76ee\u5f55")
-	var initialPtr *uint16
-	if strings.TrimSpace(initial) != "" {
-		initialPtr = syscall.StringToUTF16Ptr(initial)
-	}
+	initialSelection := strings.TrimSpace(initial)
 	callback := syscall.NewCallback(func(hwnd uintptr, msg uint32, lParam, data uintptr) uintptr {
-		if msg == bffmInitialized && data != 0 {
-			win.SendMessage(win.HWND(hwnd), bffmSetSelectionW, 1, data)
+		if msg == bffmInitialized && initialSelection != "" {
+			win.SendMessage(
+				win.HWND(hwnd),
+				bffmSetSelectionW,
+				1,
+				uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(initialSelection))),
+			)
 		}
 		return 0
 	})
@@ -1227,7 +1590,6 @@ func chooseFolder(initial string) (string, bool) {
 		LpszTitle:      title,
 		UlFlags:        bifReturnOnlyFSDirs | bifEditBox | bifNewDialogStyle,
 		Lpfn:           callback,
-		LParam:         uintptr(unsafe.Pointer(initialPtr)),
 	}
 	pidl := win.SHBrowseForFolder(&bi)
 	if pidl == 0 {
@@ -1319,6 +1681,21 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func countDiscoveredVideos(workDir string, videos []string) (rootVideos int, nestedVideos int) {
+	for _, videoPath := range videos {
+		if sameFolderPath(filepath.Dir(videoPath), workDir) {
+			rootVideos++
+			continue
+		}
+		nestedVideos++
+	}
+	return rootVideos, nestedVideos
+}
+
+func sameFolderPath(a string, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
 func createSolidBrush(rgb win.COLORREF) win.HBRUSH {
 	return win.CreateBrushIndirect(&win.LOGBRUSH{
 		LbStyle: win.BS_SOLID,
@@ -1340,6 +1717,15 @@ func fillRect(hdc win.HDC, brush win.HBRUSH, left, top, right, bottom int32) {
 	win.Rectangle_(hdc, left, top, right, bottom)
 	win.SelectObject(hdc, oldPen)
 	win.SelectObject(hdc, oldBrush)
+}
+
+func fillSolidRect(hdc win.HDC, rect win.RECT, color win.COLORREF) {
+	brush := createSolidBrush(color)
+	if brush == 0 {
+		return
+	}
+	defer win.DeleteObject(win.HGDIOBJ(brush))
+	fillRect(hdc, brush, rect.Left, rect.Top, rect.Right, rect.Bottom)
 }
 
 func drawRectBorder(hdc win.HDC, rect win.RECT, color win.COLORREF) {

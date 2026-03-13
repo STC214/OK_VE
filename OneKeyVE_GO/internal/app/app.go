@@ -19,21 +19,21 @@ type Target struct {
 }
 
 type Config struct {
-	WorkDir                string
-	OutputDir              string
-	FFmpegPath             string
-	FFprobePath            string
-	Encoder                string
-	BlackBorderMode        string
-	BlurSigma              int
-	FeatherPx              int
-	BlackLineThreshold     int
-	BlackLineRatioPercent  int
-	BlackLineRequiredRun   int
-	Targets                []Target
-	Controller             *RunController
-	OnLog                  func(string)
-	OnProgress             func(ProgressUpdate)
+	WorkDir               string
+	OutputDir             string
+	FFmpegPath            string
+	FFprobePath           string
+	Encoder               string
+	BlackBorderMode       string
+	BlurSigma             int
+	FeatherPx             int
+	BlackLineThreshold    int
+	BlackLineRatioPercent int
+	BlackLineRequiredRun  int
+	Targets               []Target
+	Controller            *RunController
+	OnLog                 func(string)
+	OnProgress            func(ProgressUpdate)
 }
 
 type ProgressUpdate struct {
@@ -119,13 +119,11 @@ func Run(cfg Config) error {
 	if len(cfg.Targets) == 0 {
 		return fmt.Errorf("at least one target ratio is required")
 	}
-	outputRoot := cfg.OutputDir
-	if !filepath.IsAbs(outputRoot) {
-		outputRoot = filepath.Join(cfg.WorkDir, outputRoot)
-	}
+	outputRoot := resolveOutputDir(cfg.WorkDir, cfg.OutputDir)
 	if isCDrivePath(outputRoot) {
 		return fmt.Errorf("refusing to write output under C drive: %s", outputRoot)
 	}
+	cfg.OutputDir = outputRoot
 
 	bins, err := ffmpeg.Locate(cfg.WorkDir, ffmpeg.Binaries{
 		FFmpeg:  cfg.FFmpegPath,
@@ -144,7 +142,7 @@ func Run(cfg Config) error {
 	emitLog(cfg, "black border mode: %s", cfg.BlackBorderMode)
 	emitLog(cfg, "black border detect: first-second avg of 4 frames, threshold<=%d, black-ratio>=%d%%, min-run=%d", cfg.BlackLineThreshold, cfg.BlackLineRatioPercent, cfg.BlackLineRequiredRun)
 
-	videos, err := ffmpeg.FindVideos(cfg.WorkDir)
+	videos, err := DiscoverVideos(cfg)
 	if err != nil {
 		return fmt.Errorf("discover videos: %w", err)
 	}
@@ -202,12 +200,12 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 	})
 	detection, detectErr := ffmpeg.DetectBlackBorders(bins.FFmpeg, videoPath, meta.Width, meta.Height, ffmpeg.BlackBorderOptions{
 		Mode:           cfg.BlackBorderMode,
-		LineThreshold:   cfg.BlackLineThreshold,
-		LineRatio:       float64(cfg.BlackLineRatioPercent) / 100.0,
-		RequiredRun:     cfg.BlackLineRequiredRun,
-		SampleFPS:       4,
-		SampleDuration:  1,
-		SampleFrameCap:  4,
+		LineThreshold:  cfg.BlackLineThreshold,
+		LineRatio:      float64(cfg.BlackLineRatioPercent) / 100.0,
+		RequiredRun:    cfg.BlackLineRequiredRun,
+		SampleFPS:      4,
+		SampleDuration: 1,
+		SampleFrameCap: 4,
 	}, hooks, func(processedFrames int) {
 		emitProgress(cfg, ProgressUpdate{
 			TotalTasks:     totalTasks,
@@ -262,7 +260,7 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 			Percent:        percentForTask(taskIndex, totalTasks, 0, meta.Frames, index == 0),
 		})
 
-		outDir := filepath.Join(cfg.OutputDir, target.Label)
+		outDir := resolveVideoOutputDir(cfg, videoPath, target.Label)
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
 			return fmt.Errorf("create output directory %s: %w", outDir, err)
 		}
@@ -430,4 +428,111 @@ func isCDrivePath(path string) bool {
 	}
 	volume := strings.ToUpper(filepath.VolumeName(filepath.Clean(path)))
 	return volume == "C:"
+}
+
+func resolveOutputDir(workDir string, outputDir string) string {
+	outputRoot := filepath.Clean(outputDir)
+	if filepath.IsAbs(outputRoot) {
+		return outputRoot
+	}
+	return filepath.Join(workDir, outputRoot)
+}
+
+func DiscoverVideos(cfg Config) ([]string, error) {
+	videos, err := ffmpeg.FindVideos(cfg.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+
+	workRoot := filepath.Clean(cfg.WorkDir)
+	outputRoot := resolveOutputDir(cfg.WorkDir, cfg.OutputDir)
+	filtered := make([]string, 0, len(videos))
+	for _, videoPath := range videos {
+		if shouldSkipDiscoveredVideo(videoPath, workRoot, outputRoot, cfg.Targets) {
+			continue
+		}
+		filtered = append(filtered, videoPath)
+	}
+	return filtered, nil
+}
+
+func resolveVideoOutputDir(cfg Config, videoPath string, targetLabel string) string {
+	videoDir := filepath.Clean(filepath.Dir(videoPath))
+	workDir := filepath.Clean(cfg.WorkDir)
+	if samePath(videoDir, workDir) {
+		return filepath.Join(cfg.OutputDir, targetLabel)
+	}
+	return filepath.Join(videoDir, targetLabel)
+}
+
+func shouldSkipDiscoveredVideo(videoPath string, workRoot string, outputRoot string, targets []Target) bool {
+	if shouldSkipRootOutputVideo(videoPath, workRoot, outputRoot, targets) {
+		return true
+	}
+
+	parentDir := filepath.Dir(videoPath)
+	if !matchesTargetLabel(filepath.Base(parentDir), targets) {
+		return false
+	}
+
+	// Nested renders are written as <sourceDir>/<targetLabel>/<videoName>.
+	// Only skip target-named folders when the original source file exists
+	// beside that target folder, so we don't hide legitimate user content.
+	sourceCandidate := filepath.Join(filepath.Dir(parentDir), filepath.Base(videoPath))
+	info, err := os.Stat(sourceCandidate)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return true
+}
+
+func shouldSkipRootOutputVideo(videoPath string, workRoot string, outputRoot string, targets []Target) bool {
+	if outputRoot == "" {
+		return false
+	}
+
+	parentDir := filepath.Dir(videoPath)
+	if !matchesTargetLabel(filepath.Base(parentDir), targets) {
+		return false
+	}
+
+	if samePath(filepath.Dir(parentDir), outputRoot) {
+		return true
+	}
+
+	// When the configured output directory equals the work directory, we must
+	// avoid treating the entire tree as generated output. In that case only the
+	// top-level ratio folders are considered root outputs.
+	if samePath(outputRoot, workRoot) {
+		return false
+	}
+
+	return isWithinPath(videoPath, outputRoot)
+}
+
+func matchesTargetLabel(name string, targets []Target) bool {
+	for _, target := range targets {
+		if strings.EqualFold(name, target.Label) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWithinPath(path string, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func samePath(a string, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }

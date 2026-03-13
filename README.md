@@ -30,6 +30,8 @@ F:\Project\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE-embedded.exe
 
 - `OneKeyVE.exe` 适合本机已有 FFmpeg 环境
 - `OneKeyVE-embedded.exe` 适合没有 FFmpeg 环境的机器
+- 当前 Go 版本支持递归扫描工作目录及子目录中的视频
+- 即使根目录没有视频，只要子目录有视频也可以正常处理
 
 ## 目录用途
 
@@ -48,6 +50,12 @@ F:\Project\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE-embedded.exe
 详细说明见：
 
 - [OneKeyVE_GO/README.md](/f:/Project/OneKey_VE/OneKeyVE_GO/README.md)
+
+当前处理规则简述：
+
+- 根目录视频输出到“根目录输出”下的 `<比例名>` 目录
+- 子目录视频输出到视频所在目录下的 `<比例名>` 目录
+- 扫描时会自动跳过程序自己生成的比例输出目录，避免重复处理
 
 ### `OneKeyVE_ALL/`
 

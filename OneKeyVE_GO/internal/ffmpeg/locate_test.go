@@ -113,6 +113,14 @@ func TestChooseRuntimeDirRejectsCAndUsesEnv(t *testing.T) {
 	t.Setenv("TEMP", "")
 	t.Setenv("TMP", "")
 
+	restorePrepareRuntimeDir := prepareRuntimeDir
+	t.Cleanup(func() {
+		prepareRuntimeDir = restorePrepareRuntimeDir
+	})
+	prepareRuntimeDir = func(path string) error {
+		return nil
+	}
+
 	dir, err := chooseRuntimeDir(`F:\work`)
 	if err != nil {
 		t.Fatalf("chooseRuntimeDir returned error: %v", err)
@@ -120,6 +128,111 @@ func TestChooseRuntimeDirRejectsCAndUsesEnv(t *testing.T) {
 	expected := filepath.Join(`F:\runtime-ok`, "OneKeyVE")
 	if dir != expected {
 		t.Fatalf("expected %q, got %q", expected, dir)
+	}
+}
+
+func TestFindVideosRecursivelyDiscoversNestedFiles(t *testing.T) {
+	root := t.TempDir()
+	rootVideo := filepath.Join(root, "root.mp4")
+	nestedVideo := filepath.Join(root, "nested", "child.mkv")
+	ignored := filepath.Join(root, "nested", "note.txt")
+
+	mustWriteFile(t, rootVideo)
+	mustWriteFile(t, nestedVideo)
+	mustWriteFile(t, ignored)
+
+	videos, err := FindVideos(root)
+	if err != nil {
+		t.Fatalf("FindVideos returned error: %v", err)
+	}
+	if len(videos) != 2 {
+		t.Fatalf("expected 2 videos, got %d: %v", len(videos), videos)
+	}
+	if videos[0] != filepath.Clean(nestedVideo) && videos[1] != filepath.Clean(nestedVideo) {
+		t.Fatalf("expected nested video in results, got %v", videos)
+	}
+	if videos[0] != filepath.Clean(rootVideo) && videos[1] != filepath.Clean(rootVideo) {
+		t.Fatalf("expected root video in results, got %v", videos)
+	}
+}
+
+func TestChooseRuntimeDirFallsBackWhenFirstCandidateIsNotWritable(t *testing.T) {
+	t.Setenv("ONEKEYVE_RUNTIME_DIR", `F:\blocked`)
+	t.Setenv("ONEKEYVE_CACHE_DIR", `F:\runtime-ok`)
+	t.Setenv("TMPDIR", "")
+	t.Setenv("TEMP", "")
+	t.Setenv("TMP", "")
+
+	restorePrepareRuntimeDir := prepareRuntimeDir
+	t.Cleanup(func() {
+		prepareRuntimeDir = restorePrepareRuntimeDir
+	})
+
+	attempts := make([]string, 0, 2)
+	prepareRuntimeDir = func(path string) error {
+		attempts = append(attempts, path)
+		if path == filepath.Join(`F:\blocked`, "OneKeyVE") {
+			return os.ErrPermission
+		}
+		return nil
+	}
+
+	dir, err := chooseRuntimeDir(`F:\work`)
+	if err != nil {
+		t.Fatalf("chooseRuntimeDir returned error: %v", err)
+	}
+
+	want := filepath.Join(`F:\runtime-ok`, "OneKeyVE")
+	if dir != want {
+		t.Fatalf("expected fallback runtime dir %q, got %q", want, dir)
+	}
+	if len(attempts) < 2 {
+		t.Fatalf("expected multiple runtime dir attempts, got %v", attempts)
+	}
+}
+
+func TestLocateRejectsInvalidExplicitOverrides(t *testing.T) {
+	tempDir := t.TempDir()
+
+	_, err := Locate(tempDir, Binaries{
+		FFmpeg:  filepath.Join(tempDir, "missing-ffmpeg.exe"),
+		FFprobe: filepath.Join(tempDir, "missing-ffprobe.exe"),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid explicit overrides to fail")
+	}
+}
+
+func TestLocateRejectsInvalidPartialOverrideInsteadOfMaskingFoundBinary(t *testing.T) {
+	tempDir := t.TempDir()
+	workDir := filepath.Join(tempDir, "work")
+	pathDir := filepath.Join(tempDir, "pathbin")
+
+	mustMkdir(t, workDir)
+	mustWriteFile(t, filepath.Join(pathDir, binaryName("ffmpeg")))
+	mustWriteFile(t, filepath.Join(pathDir, binaryName("ffprobe")))
+
+	restoreExecutable := executablePathFunc
+	restoreDriveRoots := driveRootsFunc
+	t.Cleanup(func() {
+		executablePathFunc = restoreExecutable
+		driveRootsFunc = restoreDriveRoots
+	})
+
+	executablePathFunc = func() (string, error) {
+		return filepath.Join(tempDir, "missing", "OneKeyVE.exe"), nil
+	}
+	driveRootsFunc = func() ([]string, error) {
+		return nil, nil
+	}
+
+	t.Setenv("PATH", pathDir)
+
+	_, err := Locate(workDir, Binaries{
+		FFmpeg: filepath.Join(tempDir, "does-not-exist", binaryName("ffmpeg")),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid partial override to fail")
 	}
 }
 

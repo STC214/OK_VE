@@ -24,6 +24,7 @@ var (
 	executablePathFunc = os.Executable
 	lookPathFunc       = exec.LookPath
 	driveRootsFunc     = listDriveRoots
+	prepareRuntimeDir  = ensureRuntimeDirWritable
 )
 
 const (
@@ -71,6 +72,9 @@ type diagnostics struct {
 
 func Locate(root string, overrides Binaries) (Binaries, error) {
 	overrides = mergeEnvOverrides(overrides)
+	if err := validateOverrides(overrides); err != nil {
+		return Binaries{}, err
+	}
 	if overrides.FFmpeg != "" && overrides.FFprobe != "" {
 		return Binaries{
 			FFmpeg:  overrides.FFmpeg,
@@ -1282,11 +1286,6 @@ func finishWithHooks(cmd *exec.Cmd, hooks *ProcessHooks) {
 }
 
 func FindVideos(root string) ([]string, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, err
-	}
-
 	exts := map[string]bool{
 		".mp4":  true,
 		".mov":  true,
@@ -1299,15 +1298,23 @@ func FindVideos(root string) ([]string, error) {
 	}
 
 	var videos []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if exts[ext] {
-			videos = append(videos, filepath.Join(root, entry.Name()))
+			videos = append(videos, path)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	sort.Strings(videos)
 	return videos, nil
 }
 
@@ -1585,6 +1592,7 @@ func listDriveRoots() ([]string, error) {
 }
 
 func chooseRuntimeDir(root string) (string, error) {
+	var failures []string
 	for _, candidate := range runtimeBaseCandidates(root) {
 		if candidate == "" {
 			continue
@@ -1592,7 +1600,15 @@ func chooseRuntimeDir(root string) (string, error) {
 		if isForbiddenOutputPath(candidate) {
 			continue
 		}
-		return filepath.Join(candidate, "OneKeyVE"), nil
+		runtimeDir := filepath.Join(candidate, "OneKeyVE")
+		if err := prepareRuntimeDir(runtimeDir); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", runtimeDir, err))
+			continue
+		}
+		return runtimeDir, nil
+	}
+	if len(failures) > 0 {
+		return "", fmt.Errorf("no writable non-C runtime directory available for embedded ffmpeg (%s)", strings.Join(failures, "; "))
 	}
 	return "", errors.New("no writable non-C runtime directory available for embedded ffmpeg")
 }
@@ -1657,4 +1673,44 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func validateOverrides(overrides Binaries) error {
+	if err := validateOverrideBinary("ffmpeg", overrides.FFmpeg); err != nil {
+		return err
+	}
+	if err := validateOverrideBinary("ffprobe", overrides.FFprobe); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateOverrideBinary(name string, path string) error {
+	if path == "" {
+		return nil
+	}
+	if fileExists(path) {
+		return nil
+	}
+	return fmt.Errorf("%s override does not exist or is not a file: %s", name, path)
+}
+
+func ensureRuntimeDirWritable(path string) error {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+
+	handle, err := os.CreateTemp(path, ".runtime-check-*")
+	if err != nil {
+		return err
+	}
+	name := handle.Name()
+	if closeErr := handle.Close(); closeErr != nil {
+		_ = os.Remove(name)
+		return closeErr
+	}
+	if err := os.Remove(name); err != nil {
+		return err
+	}
+	return nil
 }
