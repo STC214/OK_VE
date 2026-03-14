@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -134,6 +135,7 @@ type uiState struct {
 	summarySeq        uint64
 	summaryResult     summaryResult
 	controlResult     controlResult
+	closed            bool
 }
 
 type persistedConfig struct {
@@ -308,8 +310,9 @@ func registerButtonClass(instance win.HINSTANCE) error {
 	return nil
 }
 
-func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) (result uintptr) {
 	state := globalState
+	defer recoverWindowCallback(state, "wndProc", &result)
 
 	switch msg {
 	case win.WM_CREATE:
@@ -400,8 +403,16 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 		return 0
 	case win.WM_DESTROY:
 		if state != nil {
+			state.mu.Lock()
+			state.closed = true
+			controller := state.controller
+			state.hwnd = 0
+			state.mu.Unlock()
 			win.KillTimer(hwnd, autoSaveTimerID)
 			win.KillTimer(hwnd, uiRefreshTimerID)
+			if controller != nil {
+				_ = controller.RequestStop()
+			}
 			state.destroyResources()
 		}
 		win.PostQuitMessage(0)
@@ -411,8 +422,9 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 	return win.DefWindowProc(hwnd, msg, wParam, lParam)
 }
 
-func buttonWndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+func buttonWndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) (result uintptr) {
 	state, ok := loadButtonState(hwnd)
+	defer recoverWindowCallback(globalState, "buttonWndProc", &result)
 	switch msg {
 	case win.WM_MOUSEMOVE:
 		if ok && !state.hovered {
@@ -649,6 +661,7 @@ func (s *uiState) startRun() {
 	win.SendMessage(s.progressBar, win.PBM_SETPOS, 0, 0)
 	s.refreshLog()
 	go func() {
+		defer s.recoverAsync("run worker", controller, msgRunDone)
 		s.appendLog("\u5f00\u59cb\u6267\u884c\u56fe\u5f62\u754c\u9762\u4efb\u52a1\u3002")
 		s.appendLog("\u5de5\u4f5c\u76ee\u5f55: " + cfg.WorkDir)
 		s.appendLog("\u8f93\u51fa\u76ee\u5f55: " + cfg.OutputDir)
@@ -673,7 +686,7 @@ func (s *uiState) startRun() {
 		}
 		s.requestRefreshLocked()
 		s.mu.Unlock()
-		win.PostMessage(s.hwnd, msgRunDone, 0, 0)
+		postAppMessage(s, msgRunDone)
 	}()
 }
 
@@ -696,6 +709,7 @@ func (s *uiState) togglePause() {
 
 	s.refreshButtons()
 	go func() {
+		defer s.recoverAsync("pause worker", controller, msgControlDone)
 		err := controller.SetPaused(nextPaused)
 		s.mu.Lock()
 		s.controlResult = controlResult{
@@ -704,7 +718,7 @@ func (s *uiState) togglePause() {
 			err:    err,
 		}
 		s.mu.Unlock()
-		win.PostMessage(s.hwnd, msgControlDone, 0, 0)
+		postAppMessage(s, msgControlDone)
 	}()
 }
 
@@ -725,6 +739,7 @@ func (s *uiState) stopRun() {
 
 	s.refreshButtons()
 	go func() {
+		defer s.recoverAsync("stop worker", controller, msgControlDone)
 		err := controller.RequestStop()
 		s.mu.Lock()
 		s.controlResult = controlResult{
@@ -732,7 +747,7 @@ func (s *uiState) stopRun() {
 			err:    err,
 		}
 		s.mu.Unlock()
-		win.PostMessage(s.hwnd, msgControlDone, 0, 0)
+		postAppMessage(s, msgControlDone)
 	}()
 }
 
@@ -848,6 +863,7 @@ func (s *uiState) requestSummaryRefresh(showCompletion bool) {
 	setWindowText(s.summaryEdit, "\u6b63\u5728\u626b\u63cf\u89c6\u9891\u548c\u7ec4\u4ef6...")
 
 	go func() {
+		defer s.recoverAsync("summary worker", nil, 0)
 		text := buildSummary(snapshot)
 		s.mu.Lock()
 		if seq != s.summarySeq {
@@ -860,7 +876,7 @@ func (s *uiState) requestSummaryRefresh(showCompletion bool) {
 			showCompletion: showCompletion,
 		}
 		s.mu.Unlock()
-		win.PostMessage(s.hwnd, msgSummaryReady, 0, 0)
+		postAppMessage(s, msgSummaryReady)
 	}()
 }
 
@@ -940,7 +956,7 @@ func (s *uiState) prependLogLocked(line string) {
 	}
 }
 func (s *uiState) requestRefreshLocked() {
-	if s.hwnd == 0 {
+	if s.hwnd == 0 || s.closed {
 		return
 	}
 	s.refreshPending = true
@@ -1658,6 +1674,77 @@ func preferredWorkDir(cwd string) string {
 
 func messageBox(hwnd win.HWND, title string, text string, flags uint32) {
 	win.MessageBox(hwnd, syscall.StringToUTF16Ptr(text), syscall.StringToUTF16Ptr(title), flags)
+}
+
+func postAppMessage(s *uiState, msg uint32) {
+	if s == nil || msg == 0 {
+		return
+	}
+	s.mu.Lock()
+	hwnd := s.hwnd
+	closed := s.closed
+	s.mu.Unlock()
+	if closed || hwnd == 0 {
+		return
+	}
+	win.PostMessage(hwnd, msg, 0, 0)
+}
+
+func recoverWindowCallback(state *uiState, scope string, result *uintptr) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	handleUIPanic(state, scope, recovered)
+	if result != nil {
+		*result = 0
+	}
+}
+
+func (s *uiState) recoverAsync(scope string, controller *appcore.RunController, notifyMsg uint32) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	handleUIPanic(s, scope, recovered)
+	if controller != nil {
+		_ = controller.RequestStop()
+	}
+	if notifyMsg != 0 {
+		postAppMessage(s, notifyMsg)
+	}
+}
+
+func handleUIPanic(state *uiState, scope string, recovered any) {
+	message := fmt.Sprintf("%s panic: %v", scope, recovered)
+	stack := strings.TrimSpace(string(debug.Stack()))
+	if state == nil {
+		return
+	}
+
+	state.mu.Lock()
+	running := state.running
+	controller := state.controller
+	if running {
+		state.running = false
+		state.paused = false
+		state.stopping = false
+		state.controlBusy = false
+		state.runStopped = false
+		state.runErr = fmt.Errorf("%s", message)
+		state.controller = nil
+		state.statusText = "\u5904\u7406\u5931\u8d25"
+		state.requestRefreshLocked()
+	}
+	state.mu.Unlock()
+
+	state.appendLog(message)
+	if stack != "" {
+		state.appendLog(stack)
+	}
+	if controller != nil {
+		_ = controller.RequestStop()
+	}
 }
 
 func centerWindow(hwnd win.HWND) {

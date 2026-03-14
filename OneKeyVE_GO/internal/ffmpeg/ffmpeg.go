@@ -39,9 +39,10 @@ type Binaries struct {
 }
 
 type VideoMeta struct {
-	Width  int
-	Height int
-	Frames int
+	Width   int
+	Height  int
+	Frames  int
+	Bitrate int64
 }
 
 type CropDetection struct {
@@ -152,7 +153,7 @@ func Probe(ffprobePath string, videoPath string, hooks *ProcessHooks) (VideoMeta
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-count_frames",
-		"-show_entries", "stream=width,height,nb_frames,nb_read_frames",
+		"-show_entries", "stream=width,height,nb_frames,nb_read_frames,bit_rate:format=bit_rate",
 		"-of", "json",
 		videoPath,
 	)
@@ -178,8 +179,12 @@ func Probe(ffprobePath string, videoPath string, hooks *ProcessHooks) (VideoMeta
 			Height       int    `json:"height"`
 			Frames       string `json:"nb_frames"`
 			ReadFrames   string `json:"nb_read_frames"`
+			BitRate      string `json:"bit_rate"`
 			DisplayRatio string `json:"display_aspect_ratio"`
 		} `json:"streams"`
+		Format struct {
+			BitRate string `json:"bit_rate"`
+		} `json:"format"`
 	}
 
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
@@ -195,9 +200,10 @@ func Probe(ffprobePath string, videoPath string, hooks *ProcessHooks) (VideoMeta
 	}
 
 	return VideoMeta{
-		Width:  stream.Width,
-		Height: stream.Height,
-		Frames: firstPositiveInt(stream.Frames, stream.ReadFrames),
+		Width:   stream.Width,
+		Height:  stream.Height,
+		Frames:  firstPositiveInt(stream.Frames, stream.ReadFrames),
+		Bitrate: firstPositiveInt64(stream.BitRate, payload.Format.BitRate),
 	}, nil
 }
 
@@ -1268,6 +1274,7 @@ func startWithHooks(cmd *exec.Cmd, hooks *ProcessHooks) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", filepath.Base(cmd.Path), err)
 	}
+	_ = procutil.BindLifetime(cmd.Process)
 	if hooks != nil && hooks.Started != nil {
 		if err := hooks.Started(cmd.Process); err != nil {
 			_ = cmd.Process.Kill()
@@ -1539,6 +1546,19 @@ func firstPositiveInt(values ...string) int {
 			continue
 		}
 		n, err := strconv.Atoi(value)
+		if err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+func firstPositiveInt64(values ...string) int64 {
+	for _, value := range values {
+		if value == "" || strings.EqualFold(value, "N/A") {
+			continue
+		}
+		n, err := strconv.ParseInt(value, 10, 64)
 		if err == nil && n > 0 {
 			return n
 		}

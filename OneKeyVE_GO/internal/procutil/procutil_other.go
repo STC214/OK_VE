@@ -17,3 +17,7 @@ func SuspendProcess(process *os.Process) error {
 func ResumeProcess(process *os.Process) error {
 	return nil
 }
+
+func BindLifetime(process *os.Process) error {
+	return nil
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"onekeyvego/internal/ffmpeg"
@@ -45,6 +46,14 @@ type ProgressUpdate struct {
 	CurrentFrame   int
 	TotalFrames    int
 	Percent        float64
+}
+
+type targetRenderPlan struct {
+	Target                Target
+	OutputDir             string
+	OutputPath            string
+	SkipExisting          bool
+	RemovedFailedExisting bool
 }
 
 func DefaultConfig(workdir string) Config {
@@ -177,6 +186,38 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 	if err := waitForControl(cfg); err != nil {
 		return err
 	}
+	plans, err := planTargetRenders(cfg, videoPath)
+	if err != nil {
+		return err
+	}
+
+	videoName := filepath.Base(videoPath)
+	firstRenderableIndex := -1
+	for index, plan := range plans {
+		taskIndex := completedBase + index
+		if plan.SkipExisting {
+			emitLog(cfg, "skip existing render [%s] %s -> %s", plan.Target.Label, videoName, plan.OutputPath)
+			emitProgress(cfg, ProgressUpdate{
+				TotalTasks:     totalTasks,
+				CompletedTasks: taskIndex + 1,
+				CurrentTask:    taskIndex + 1,
+				VideoName:      videoName,
+				TargetLabel:    plan.Target.Label,
+				Percent:        percentForCompletedTasks(taskIndex+1, totalTasks),
+			})
+			continue
+		}
+		if plan.RemovedFailedExisting {
+			emitLog(cfg, "existing output smaller than source, deleted and will re-render [%s] %s", plan.Target.Label, plan.OutputPath)
+		}
+		if firstRenderableIndex < 0 {
+			firstRenderableIndex = index
+		}
+	}
+	if firstRenderableIndex < 0 {
+		emitLog(cfg, "all target renders already valid for %s, skipping source video", videoName)
+		return nil
+	}
 	hooks := processHooks(cfg)
 	meta, err := ffmpeg.Probe(bins.FFprobe, videoPath, hooks)
 	if err != nil {
@@ -187,16 +228,16 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 	}
 
 	crop := ffmpeg.CropRect{}
-	videoName := filepath.Base(videoPath)
+	completedBeforeAnalysis := completedBase + firstRenderableIndex
 	emitLog(cfg, "analyzing black borders for %s", videoName)
 	emitProgress(cfg, ProgressUpdate{
 		TotalTasks:     totalTasks,
-		CompletedTasks: completedBase,
-		CurrentTask:    completedBase + 1,
+		CompletedTasks: completedBeforeAnalysis,
+		CurrentTask:    completedBeforeAnalysis + 1,
 		VideoName:      videoName,
 		TargetLabel:    "黑边分析",
 		TotalFrames:    meta.Frames,
-		Percent:        percentForAnalysis(completedBase, totalTasks, 0, meta.Frames),
+		Percent:        percentForAnalysis(completedBeforeAnalysis, totalTasks, 0, meta.Frames),
 	})
 	detection, detectErr := ffmpeg.DetectBlackBorders(bins.FFmpeg, videoPath, meta.Width, meta.Height, ffmpeg.BlackBorderOptions{
 		Mode:           cfg.BlackBorderMode,
@@ -209,13 +250,13 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 	}, hooks, func(processedFrames int) {
 		emitProgress(cfg, ProgressUpdate{
 			TotalTasks:     totalTasks,
-			CompletedTasks: completedBase,
-			CurrentTask:    completedBase + 1,
+			CompletedTasks: completedBeforeAnalysis,
+			CurrentTask:    completedBeforeAnalysis + 1,
 			VideoName:      videoName,
 			TargetLabel:    "黑边分析",
 			CurrentFrame:   processedFrames,
 			TotalFrames:    meta.Frames,
-			Percent:        percentForAnalysis(completedBase, totalTasks, processedFrames, meta.Frames),
+			Percent:        percentForAnalysis(completedBeforeAnalysis, totalTasks, processedFrames, meta.Frames),
 		})
 	})
 	if errors.Is(detectErr, ErrStopped) || (cfg.Controller != nil && cfg.Controller.StopRequested()) {
@@ -229,45 +270,52 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 	}
 	emitProgress(cfg, ProgressUpdate{
 		TotalTasks:     totalTasks,
-		CompletedTasks: completedBase,
-		CurrentTask:    completedBase + 1,
+		CompletedTasks: completedBeforeAnalysis,
+		CurrentTask:    completedBeforeAnalysis + 1,
 		VideoName:      videoName,
 		TargetLabel:    "黑边分析",
 		CurrentFrame:   meta.Frames,
 		TotalFrames:    meta.Frames,
-		Percent:        percentForAnalysis(completedBase, totalTasks, meta.Frames, meta.Frames),
+		Percent:        percentForAnalysis(completedBeforeAnalysis, totalTasks, meta.Frames, meta.Frames),
 	})
 
 	activeWidth := crop.ActiveWidth(meta.Width)
 	activeHeight := crop.ActiveHeight(meta.Height)
 	rotate, width, height := ffmpeg.PlannedDimensions(activeWidth, activeHeight)
 	emitLog(cfg, "processing %s (source=%dx%d active=%dx%d rotate=%v normalized=%dx%d)", videoName, meta.Width, meta.Height, activeWidth, activeHeight, rotate, width, height)
+	targetBitrate := targetVideoBitrate(meta.Bitrate)
+	if targetBitrate > 0 {
+		emitLog(cfg, "video bitrate plan for %s: source=%s target=%s", videoName, formatBitrate(meta.Bitrate), formatBitrate(targetBitrate))
+	} else {
+		emitLog(cfg, "video bitrate plan for %s: source bitrate unavailable, using encoder defaults", videoName)
+	}
 
-	for index, target := range cfg.Targets {
+	for index, plan := range plans {
+		if plan.SkipExisting {
+			continue
+		}
 		if err := waitForControl(cfg); err != nil {
 			return err
 		}
 		taskIndex := completedBase + index
-		targetHeight := int(float64(width) / target.Ratio)
+		targetHeight := int(float64(width) / plan.Target.Ratio)
 		filter := ffmpeg.BuildFilter(rotate, width, height, crop, targetHeight, cfg.BlurSigma, cfg.FeatherPx)
 		emitProgress(cfg, ProgressUpdate{
 			TotalTasks:     totalTasks,
 			CompletedTasks: taskIndex,
 			CurrentTask:    taskIndex + 1,
 			VideoName:      videoName,
-			TargetLabel:    target.Label,
+			TargetLabel:    plan.Target.Label,
 			TotalFrames:    meta.Frames,
-			Percent:        percentForTask(taskIndex, totalTasks, 0, meta.Frames, index == 0),
+			Percent:        percentForTask(taskIndex, totalTasks, 0, meta.Frames, index == firstRenderableIndex),
 		})
 
-		outDir := resolveVideoOutputDir(cfg, videoPath, target.Label)
-		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			return fmt.Errorf("create output directory %s: %w", outDir, err)
+		if err := os.MkdirAll(plan.OutputDir, 0o755); err != nil {
+			return fmt.Errorf("create output directory %s: %w", plan.OutputDir, err)
 		}
 
-		outPath := filepath.Join(outDir, videoName)
-		cmd := buildCommand(bins.FFmpeg, encoder, videoPath, outPath, filter)
-		emitLog(cfg, "rendering %s -> %s", videoName, outPath)
+		cmd := buildCommand(bins.FFmpeg, encoder, videoPath, plan.OutputPath, filter, targetBitrate)
+		emitLog(cfg, "rendering [%s] %s -> %s", plan.Target.Label, videoName, plan.OutputPath)
 
 		lastFrame := 0
 		err := ffmpeg.RunWithProgress(cmd, func(frame int) {
@@ -276,23 +324,23 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 				CompletedTasks: taskIndex,
 				CurrentTask:    taskIndex + 1,
 				VideoName:      videoName,
-				TargetLabel:    target.Label,
+				TargetLabel:    plan.Target.Label,
 				CurrentFrame:   frame,
 				TotalFrames:    meta.Frames,
-				Percent:        percentForTask(taskIndex, totalTasks, frame, meta.Frames, index == 0),
+				Percent:        percentForTask(taskIndex, totalTasks, frame, meta.Frames, index == firstRenderableIndex),
 			})
 
 			if meta.Frames > 0 {
 				if frame-lastFrame >= 120 || frame == meta.Frames {
 					progress := float64(frame) / float64(meta.Frames) * 100
-					emitLog(cfg, "[%s] %s frame=%d/%d %.1f%%", target.Label, videoName, frame, meta.Frames, progress)
+					emitLog(cfg, "[%s] %s frame=%d/%d %.1f%%", plan.Target.Label, videoName, frame, meta.Frames, progress)
 					lastFrame = frame
 				}
 				return
 			}
 
 			if frame-lastFrame >= 120 {
-				emitLog(cfg, "[%s] %s frame=%d", target.Label, videoName, frame)
+				emitLog(cfg, "[%s] %s frame=%d", plan.Target.Label, videoName, frame)
 				lastFrame = frame
 			}
 		}, hooks)
@@ -300,14 +348,14 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 			if cfg.Controller != nil && cfg.Controller.StopRequested() {
 				return ErrStopped
 			}
-			return fmt.Errorf("render %s for %s: %w", target.Label, filepath.Base(videoPath), err)
+			return fmt.Errorf("render %s for %s: %w", plan.Target.Label, filepath.Base(videoPath), err)
 		}
 		emitProgress(cfg, ProgressUpdate{
 			TotalTasks:     totalTasks,
 			CompletedTasks: taskIndex + 1,
 			CurrentTask:    taskIndex + 1,
 			VideoName:      videoName,
-			TargetLabel:    target.Label,
+			TargetLabel:    plan.Target.Label,
 			CurrentFrame:   meta.Frames,
 			TotalFrames:    meta.Frames,
 			Percent:        percentForCompletedTasks(taskIndex+1, totalTasks),
@@ -378,7 +426,7 @@ func percentForCompletedTasks(completedTasks int, totalTasks int) float64 {
 	return float64(completedTasks) / float64(totalTasks) * 100
 }
 
-func buildCommand(ffmpegPath string, encoder string, inputPath string, outputPath string, filter string) *exec.Cmd {
+func buildCommand(ffmpegPath string, encoder string, inputPath string, outputPath string, filter string, bitrate int64) *exec.Cmd {
 	args := []string{
 		"-y",
 		"-progress", "pipe:1",
@@ -393,10 +441,6 @@ func buildCommand(ffmpegPath string, encoder string, inputPath string, outputPat
 		args = append(args,
 			"-c:v", "h264_nvenc",
 			"-rc:v", "vbr",
-			"-cq:v", "24",
-			"-b:v", "10M",
-			"-maxrate:v", "15M",
-			"-bufsize:v", "20M",
 			"-preset", "p4",
 			"-tune", "hq",
 		)
@@ -404,11 +448,32 @@ func buildCommand(ffmpegPath string, encoder string, inputPath string, outputPat
 		args = append(args,
 			"-c:v", "libx264",
 			"-preset", "medium",
-			"-crf", "20",
-			"-maxrate:v", "15M",
-			"-bufsize:v", "20M",
 			"-pix_fmt", "yuv420p",
 		)
+	}
+
+	if bitrate > 0 {
+		args = append(args,
+			"-b:v", strconv.FormatInt(bitrate, 10),
+			"-maxrate:v", strconv.FormatInt(bitrate, 10),
+			"-bufsize:v", strconv.FormatInt(bitrate*2, 10),
+		)
+	} else {
+		switch strings.ToLower(encoder) {
+		case "h264_nvenc":
+			args = append(args,
+				"-cq:v", "24",
+				"-b:v", "10M",
+				"-maxrate:v", "15M",
+				"-bufsize:v", "20M",
+			)
+		default:
+			args = append(args,
+				"-crf", "20",
+				"-maxrate:v", "15M",
+				"-bufsize:v", "20M",
+			)
+		}
 	}
 
 	args = append(args,
@@ -420,6 +485,21 @@ func buildCommand(ffmpegPath string, encoder string, inputPath string, outputPat
 	cmd := exec.Command(ffmpegPath, args...)
 	procutil.HideWindow(cmd)
 	return cmd
+}
+
+func targetVideoBitrate(sourceBitrate int64) int64 {
+	if sourceBitrate <= 0 {
+		return 0
+	}
+	return sourceBitrate * 3 / 2
+}
+
+func formatBitrate(bitrate int64) string {
+	if bitrate <= 0 {
+		return "unknown"
+	}
+	mbps := float64(bitrate) / 1_000_000
+	return fmt.Sprintf("%.2fMbps", mbps)
 }
 
 func isCDrivePath(path string) bool {
@@ -436,6 +516,51 @@ func resolveOutputDir(workDir string, outputDir string) string {
 		return outputRoot
 	}
 	return filepath.Join(workDir, outputRoot)
+}
+
+func planTargetRenders(cfg Config, videoPath string) ([]targetRenderPlan, error) {
+	sourceInfo, err := os.Stat(videoPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat source video %s: %w", videoPath, err)
+	}
+	if sourceInfo.IsDir() {
+		return nil, fmt.Errorf("source video path is a directory: %s", videoPath)
+	}
+
+	videoName := filepath.Base(videoPath)
+	sourceSize := sourceInfo.Size()
+	plans := make([]targetRenderPlan, 0, len(cfg.Targets))
+	for _, target := range cfg.Targets {
+		outputDir := resolveVideoOutputDir(cfg, videoPath, target.Label)
+		outputPath := filepath.Join(outputDir, videoName)
+		plan := targetRenderPlan{
+			Target:     target,
+			OutputDir:  outputDir,
+			OutputPath: outputPath,
+		}
+
+		outputInfo, err := os.Stat(outputPath)
+		switch {
+		case err == nil:
+			if outputInfo.IsDir() {
+				return nil, fmt.Errorf("output path is a directory: %s", outputPath)
+			}
+			if outputInfo.Size() >= sourceSize {
+				plan.SkipExisting = true
+			} else {
+				if removeErr := os.Remove(outputPath); removeErr != nil {
+					return nil, fmt.Errorf("remove failed output %s: %w", outputPath, removeErr)
+				}
+				plan.RemovedFailedExisting = true
+			}
+		case os.IsNotExist(err):
+		default:
+			return nil, fmt.Errorf("stat output %s: %w", outputPath, err)
+		}
+
+		plans = append(plans, plan)
+	}
+	return plans, nil
 }
 
 func DiscoverVideos(cfg Config) ([]string, error) {
