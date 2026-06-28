@@ -8,8 +8,6 @@ New-Item -ItemType Directory -Force ".tmp-go", ".gocache", ".gomodcache", "bin",
 $env:GOTMPDIR = (Resolve-Path ".tmp-go").Path
 $env:GOCACHE = (Resolve-Path ".gocache").Path
 $env:GOMODCACHE = (Resolve-Path ".gomodcache").Path
-$env:GOPROXY = "file:///F:/Programer/Go_Workspace/pkg/mod/cache/download"
-$env:GOSUMDB = "off"
 
 $iconPath = Join-Path $root "assets\app.ico"
 

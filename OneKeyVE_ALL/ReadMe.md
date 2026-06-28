@@ -10,7 +10,7 @@
 
 Go 版本已迁移到项目根目录下的独立子项目：
 
-- `F:\Project\OneKey_VE\OneKeyVE_GO`
+- `F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO`
 
 迁移原则：
 

@@ -18,11 +18,12 @@ func TestPlannedDimensions(t *testing.T) {
 }
 
 func TestBuildFilter(t *testing.T) {
-	filter := BuildFilter(true, 1081, 1921, CropRect{X: 10, Y: 20, Width: 1080, Height: 1920}, 2401, 20, 30)
+	filter := BuildFilter(true, 1081, 1921, CropRect{X: 10, Y: 20, Width: 1080, Height: 1920}, 1080, 2401, 20, 30)
 	expectedParts := []string{
 		"crop=1080:1920:10:20",
 		"transpose=1",
 		"scale=1080:2400:force_original_aspect_ratio=increase",
+		"[fg_src]scale=1080:1920,setsar=1[fg_scaled]",
 		"gblur=sigma=20",
 		"drawbox=x=0:y=0:w=1080:h=30:t=fill:c=black",
 		"overlay=x=0:y=240:shortest=1:format=auto",
@@ -36,7 +37,7 @@ func TestBuildFilter(t *testing.T) {
 }
 
 func TestBuildFilterCropsBeforeSplitSoBackgroundUsesCroppedSource(t *testing.T) {
-	filter := BuildFilter(false, 1080, 1920, CropRect{X: 12, Y: 24, Width: 1000, Height: 1800}, 2400, 20, 30)
+	filter := BuildFilter(false, 1080, 1920, CropRect{X: 12, Y: 24, Width: 1000, Height: 1800}, 1080, 2400, 20, 30)
 
 	cropIndex := strings.Index(filter, "[0:v]crop=1000:1800:12:24,")
 	splitIndex := strings.Index(filter, "[raw]split=2[bg_src][fg_src];")
@@ -57,8 +58,24 @@ func TestBuildFilterCropsBeforeSplitSoBackgroundUsesCroppedSource(t *testing.T) 
 }
 
 func TestBuildFilterWithoutCrop(t *testing.T) {
-	filter := BuildFilter(false, 720, 1280, CropRect{}, 1600, 20, 30)
+	filter := BuildFilter(false, 720, 1280, CropRect{}, 720, 1600, 20, 30)
 	if strings.Contains(filter, "[0:v]crop=") {
 		t.Fatalf("expected filter without source crop prefix, got %s", filter)
+	}
+}
+
+func TestBuildFilterSupportsFixedOutputSize(t *testing.T) {
+	filter := BuildFilter(false, 1080, 1920, CropRect{}, 1156, 2510, 20, 30)
+	expectedParts := []string{
+		"scale=1156:2510:force_original_aspect_ratio=increase",
+		"[fg_src]scale=1156:2054,setsar=1[fg_scaled]",
+		"color=c=white:s=1156x2054",
+		"overlay=x=0:y=228:shortest=1:format=auto",
+	}
+
+	for _, part := range expectedParts {
+		if !strings.Contains(filter, part) {
+			t.Fatalf("expected filter to contain %q, got %s", part, filter)
+		}
 	}
 }

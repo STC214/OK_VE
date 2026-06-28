@@ -15,8 +15,11 @@ import (
 )
 
 type Target struct {
-	Label string
-	Ratio float64
+	Label   string
+	Ratio   float64
+	Width   int
+	Height  int
+	Aliases []string
 }
 
 type Config struct {
@@ -68,8 +71,9 @@ func DefaultConfig(workdir string) Config {
 		BlackLineRatioPercent: 60,
 		BlackLineRequiredRun:  2,
 		Targets: []Target{
-			{Label: "9x20", Ratio: 9.0 / 20.0},
-			{Label: "5x11", Ratio: 5.0 / 11.0},
+			{Label: "70Pro", Ratio: 9.0 / 20.0, Aliases: []string{"9x20"}},
+			{Label: "Ace5", Ratio: 5.0 / 11.0, Aliases: []string{"5x11"}},
+			{Label: "90", Width: 1156, Height: 2510},
 		},
 	}
 }
@@ -127,6 +131,11 @@ func Run(cfg Config) error {
 	}
 	if len(cfg.Targets) == 0 {
 		return fmt.Errorf("at least one target ratio is required")
+	}
+	for _, target := range cfg.Targets {
+		if err := target.Validate(); err != nil {
+			return err
+		}
 	}
 	outputRoot := resolveOutputDir(cfg.WorkDir, cfg.OutputDir)
 	if isCDrivePath(outputRoot) {
@@ -186,7 +195,8 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 	if err := waitForControl(cfg); err != nil {
 		return err
 	}
-	plans, err := planTargetRenders(cfg, videoPath)
+	hooks := processHooks(cfg)
+	plans, err := planTargetRenders(cfg, bins, videoPath, hooks)
 	if err != nil {
 		return err
 	}
@@ -208,7 +218,7 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 			continue
 		}
 		if plan.RemovedFailedExisting {
-			emitLog(cfg, "existing output smaller than source, deleted and will re-render [%s] %s", plan.Target.Label, plan.OutputPath)
+			emitLog(cfg, "existing output failed validation, deleted and will re-render [%s] %s", plan.Target.Label, plan.OutputPath)
 		}
 		if firstRenderableIndex < 0 {
 			firstRenderableIndex = index
@@ -218,7 +228,6 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 		emitLog(cfg, "all target renders already valid for %s, skipping source video", videoName)
 		return nil
 	}
-	hooks := processHooks(cfg)
 	meta, err := ffmpeg.Probe(bins.FFprobe, videoPath, hooks)
 	if err != nil {
 		if cfg.Controller != nil && cfg.Controller.StopRequested() {
@@ -298,8 +307,8 @@ func processVideo(cfg Config, bins ffmpeg.Binaries, encoder string, videoPath st
 			return err
 		}
 		taskIndex := completedBase + index
-		targetHeight := int(float64(width) / plan.Target.Ratio)
-		filter := ffmpeg.BuildFilter(rotate, width, height, crop, targetHeight, cfg.BlurSigma, cfg.FeatherPx)
+		targetWidth, targetHeight := plan.Target.Dimensions(width)
+		filter := ffmpeg.BuildFilter(rotate, width, height, crop, targetWidth, targetHeight, cfg.BlurSigma, cfg.FeatherPx)
 		emitProgress(cfg, ProgressUpdate{
 			TotalTasks:     totalTasks,
 			CompletedTasks: taskIndex,
@@ -494,6 +503,34 @@ func targetVideoBitrate(sourceBitrate int64) int64 {
 	return sourceBitrate * 3 / 2
 }
 
+func (t Target) Dimensions(sourceWidth int) (int, int) {
+	if t.Width > 0 && t.Height > 0 {
+		return t.Width, t.Height
+	}
+	width := sourceWidth
+	height := 0
+	if t.Ratio > 0 {
+		height = int(float64(width) / t.Ratio)
+	}
+	return width, height
+}
+
+func (t Target) Validate() error {
+	if strings.TrimSpace(t.Label) == "" {
+		return fmt.Errorf("target label cannot be empty")
+	}
+	if t.Width > 0 || t.Height > 0 {
+		if t.Width <= 0 || t.Height <= 0 {
+			return fmt.Errorf("target %s fixed dimensions must include width and height", t.Label)
+		}
+		return nil
+	}
+	if t.Ratio <= 0 {
+		return fmt.Errorf("target %s ratio must be positive", t.Label)
+	}
+	return nil
+}
+
 func formatBitrate(bitrate int64) string {
 	if bitrate <= 0 {
 		return "unknown"
@@ -518,7 +555,7 @@ func resolveOutputDir(workDir string, outputDir string) string {
 	return filepath.Join(workDir, outputRoot)
 }
 
-func planTargetRenders(cfg Config, videoPath string) ([]targetRenderPlan, error) {
+func planTargetRenders(cfg Config, bins ffmpeg.Binaries, videoPath string, hooks *ffmpeg.ProcessHooks) ([]targetRenderPlan, error) {
 	sourceInfo, err := os.Stat(videoPath)
 	if err != nil {
 		return nil, fmt.Errorf("stat source video %s: %w", videoPath, err)
@@ -528,10 +565,12 @@ func planTargetRenders(cfg Config, videoPath string) ([]targetRenderPlan, error)
 	}
 
 	videoName := filepath.Base(videoPath)
-	sourceSize := sourceInfo.Size()
 	plans := make([]targetRenderPlan, 0, len(cfg.Targets))
 	for _, target := range cfg.Targets {
 		outputDir := resolveVideoOutputDir(cfg, videoPath, target.Label)
+		if isCDrivePath(outputDir) {
+			return nil, fmt.Errorf("refusing to write output under C drive: %s", outputDir)
+		}
 		outputPath := filepath.Join(outputDir, videoName)
 		plan := targetRenderPlan{
 			Target:     target,
@@ -545,11 +584,16 @@ func planTargetRenders(cfg Config, videoPath string) ([]targetRenderPlan, error)
 			if outputInfo.IsDir() {
 				return nil, fmt.Errorf("output path is a directory: %s", outputPath)
 			}
-			if outputInfo.Size() >= sourceSize {
+			if outputInfo.Size() <= 0 {
+				if removeErr := os.Remove(outputPath); removeErr != nil {
+					return nil, fmt.Errorf("remove empty output %s: %w", outputPath, removeErr)
+				}
+				plan.RemovedFailedExisting = true
+			} else if isExistingRenderValid(bins, outputPath, hooks) {
 				plan.SkipExisting = true
 			} else {
 				if removeErr := os.Remove(outputPath); removeErr != nil {
-					return nil, fmt.Errorf("remove failed output %s: %w", outputPath, removeErr)
+					return nil, fmt.Errorf("remove invalid output %s: %w", outputPath, removeErr)
 				}
 				plan.RemovedFailedExisting = true
 			}
@@ -563,6 +607,14 @@ func planTargetRenders(cfg Config, videoPath string) ([]targetRenderPlan, error)
 	return plans, nil
 }
 
+func isExistingRenderValid(bins ffmpeg.Binaries, outputPath string, hooks *ffmpeg.ProcessHooks) bool {
+	if strings.TrimSpace(bins.FFprobe) == "" {
+		return false
+	}
+	meta, err := ffmpeg.Probe(bins.FFprobe, outputPath, hooks)
+	return err == nil && meta.Width > 0 && meta.Height > 0
+}
+
 func DiscoverVideos(cfg Config) ([]string, error) {
 	videos, err := ffmpeg.FindVideos(cfg.WorkDir)
 	if err != nil {
@@ -571,14 +623,30 @@ func DiscoverVideos(cfg Config) ([]string, error) {
 
 	workRoot := filepath.Clean(cfg.WorkDir)
 	outputRoot := resolveOutputDir(cfg.WorkDir, cfg.OutputDir)
+	skipTargets := discoverySkipTargets(cfg)
 	filtered := make([]string, 0, len(videos))
 	for _, videoPath := range videos {
-		if shouldSkipDiscoveredVideo(videoPath, workRoot, outputRoot, cfg.Targets) {
+		if shouldSkipDiscoveredVideo(videoPath, workRoot, outputRoot, skipTargets) {
 			continue
 		}
 		filtered = append(filtered, videoPath)
 	}
 	return filtered, nil
+}
+
+func discoverySkipTargets(cfg Config) []Target {
+	defaultTargets := DefaultConfig(cfg.WorkDir).Targets
+	targets := make([]Target, 0, len(defaultTargets)+len(cfg.Targets))
+	seen := map[string]bool{}
+	for _, target := range append(defaultTargets, cfg.Targets...) {
+		key := strings.ToLower(strings.TrimSpace(target.Label))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		targets = append(targets, target)
+	}
+	return targets
 }
 
 func resolveVideoOutputDir(cfg Config, videoPath string, targetLabel string) string {
@@ -639,6 +707,11 @@ func matchesTargetLabel(name string, targets []Target) bool {
 	for _, target := range targets {
 		if strings.EqualFold(name, target.Label) {
 			return true
+		}
+		for _, alias := range target.Aliases {
+			if strings.EqualFold(name, alias) {
+				return true
+			}
 		}
 	}
 	return false

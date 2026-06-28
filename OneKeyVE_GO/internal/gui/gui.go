@@ -43,6 +43,9 @@ const (
 	idBlackModeCombo
 	idBlurEdit
 	idFeatherEdit
+	idTarget70ProCheck
+	idTargetAce5Check
+	idTarget90Check
 	idRun
 	idPause
 	idStop
@@ -96,6 +99,7 @@ type uiState struct {
 	blackModeCombo win.HWND
 	blurEdit       win.HWND
 	featherEdit    win.HWND
+	targetChecks   map[string]win.HWND
 	summaryEdit    win.HWND
 	statusStatic   win.HWND
 	logEdit        win.HWND
@@ -139,17 +143,18 @@ type uiState struct {
 }
 
 type persistedConfig struct {
-	WorkDir               string `json:"work_dir"`
-	OutputDir             string `json:"output_dir"`
-	FFmpegPath            string `json:"ffmpeg_path"`
-	FFprobePath           string `json:"ffprobe_path"`
-	Encoder               string `json:"encoder"`
-	BlackBorderMode       string `json:"black_border_mode"`
-	BlurSigma             int    `json:"blur_sigma"`
-	FeatherPx             int    `json:"feather_px"`
-	BlackLineThreshold    int    `json:"black_line_threshold"`
-	BlackLineRatioPercent int    `json:"black_line_ratio_percent"`
-	BlackLineRequiredRun  int    `json:"black_line_required_run"`
+	WorkDir               string   `json:"work_dir"`
+	OutputDir             string   `json:"output_dir"`
+	FFmpegPath            string   `json:"ffmpeg_path"`
+	FFprobePath           string   `json:"ffprobe_path"`
+	Encoder               string   `json:"encoder"`
+	BlackBorderMode       string   `json:"black_border_mode"`
+	BlurSigma             int      `json:"blur_sigma"`
+	FeatherPx             int      `json:"feather_px"`
+	BlackLineThreshold    int      `json:"black_line_threshold"`
+	BlackLineRatioPercent int      `json:"black_line_ratio_percent"`
+	BlackLineRequiredRun  int      `json:"black_line_required_run"`
+	SelectedTargets       []string `json:"selected_targets"`
 }
 
 type buttonVariant int
@@ -174,6 +179,7 @@ type summarySnapshot struct {
 	ffprobePath string
 	encoder     string
 	blackMode   string
+	targets     []appcore.Target
 }
 
 type summaryResult struct {
@@ -193,6 +199,12 @@ var (
 	buttonStates   = map[win.HWND]*buttonState{}
 	buttonStatesMu sync.Mutex
 )
+
+var selectableTargets = []appcore.Target{
+	{Label: "70Pro", Ratio: 9.0 / 20.0, Aliases: []string{"9x20"}},
+	{Label: "Ace5", Ratio: 5.0 / 11.0, Aliases: []string{"5x11"}},
+	{Label: "90", Width: 1156, Height: 2510},
+}
 
 func Run() error {
 	runtime.LockOSThread()
@@ -356,7 +368,7 @@ func wndProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) (result uintptr)
 			}
 		}
 		return 0
-	case win.WM_CTLCOLORSTATIC:
+	case win.WM_CTLCOLORSTATIC, win.WM_CTLCOLORBTN:
 		if state != nil {
 			hdc := win.HDC(wParam)
 			win.SetBkMode(hdc, win.TRANSPARENT)
@@ -520,6 +532,7 @@ func (s *uiState) initControls() {
 	s.fontTitle = createFont(32, 700, "Segoe UI Semibold")
 	s.fontMono = createFont(17, 400, "Consolas")
 	defaultCfg := appcore.DefaultConfig(preferredWorkDir(currentWorkingDir()))
+	defaultCfg.Targets = append([]appcore.Target(nil), selectableTargets...)
 	saved := s.loadSavedConfig(defaultCfg)
 	workDir := saved.WorkDir
 	outputDir := saved.OutputDir
@@ -549,13 +562,19 @@ func (s *uiState) initControls() {
 	s.blurEdit = createEdit(s.hwnd, idBlurEdit, strconv.Itoa(saved.BlurSigma), 388, 490, 90, 30)
 	createLabel(s.hwnd, "\u7fbd\u5316\u50cf\u7d20", 28, 534, 120, 24, s.fontNormal)
 	s.featherEdit = createEdit(s.hwnd, idFeatherEdit, strconv.Itoa(saved.FeatherPx), 28, 562, 90, 30)
-	s.runButton = createButton(s.hwnd, idRun, "\u5f00\u59cb\u5904\u7406", 28, 614, 140, 42, buttonVariantPrimary)
-	s.pauseButton = createButton(s.hwnd, idPause, "\u6682\u505c\u5904\u7406", 178, 614, 120, 42, buttonVariantSecondary)
-	s.stopButton = createButton(s.hwnd, idStop, "\u505c\u6b62\u5904\u7406", 308, 614, 116, 42, buttonVariantDanger)
-	createButton(s.hwnd, idOpenOutput, "\u6253\u5f00\u6839\u76ee\u5f55\u8f93\u51fa", 28, 664, 220, 38, buttonVariantSecondary)
-	createLabel(s.hwnd, "\u8fd0\u884c\u72b6\u6001", 28, 716, 100, 24, s.fontNormal)
-	s.statusStatic = createLabel(s.hwnd, s.statusText, 28, 744, 474, 48, s.fontNormal)
-	s.progressBar = createProgressBar(s.hwnd, idProgressBar, 28, 802, 474, 24)
+	createLabel(s.hwnd, "\u8f93\u51fa\u89c4\u683c", 148, 534, 120, 24, s.fontNormal)
+	s.targetChecks = map[string]win.HWND{
+		"70Pro": createCheckbox(s.hwnd, idTarget70ProCheck, "70Pro", 148, 562, 92, 28, targetSelected(saved, "70Pro")),
+		"Ace5":  createCheckbox(s.hwnd, idTargetAce5Check, "Ace5", 250, 562, 82, 28, targetSelected(saved, "Ace5")),
+		"90":    createCheckbox(s.hwnd, idTarget90Check, "90", 342, 562, 68, 28, targetSelected(saved, "90")),
+	}
+	s.runButton = createButton(s.hwnd, idRun, "\u5f00\u59cb\u5904\u7406", 28, 626, 140, 42, buttonVariantPrimary)
+	s.pauseButton = createButton(s.hwnd, idPause, "\u6682\u505c\u5904\u7406", 178, 626, 120, 42, buttonVariantSecondary)
+	s.stopButton = createButton(s.hwnd, idStop, "\u505c\u6b62\u5904\u7406", 308, 626, 116, 42, buttonVariantDanger)
+	createButton(s.hwnd, idOpenOutput, "\u6253\u5f00\u6839\u76ee\u5f55\u8f93\u51fa", 28, 682, 220, 38, buttonVariantSecondary)
+	createLabel(s.hwnd, "\u8fd0\u884c\u72b6\u6001", 28, 734, 100, 24, s.fontNormal)
+	s.statusStatic = createLabel(s.hwnd, s.statusText, 28, 762, 474, 48, s.fontNormal)
+	s.progressBar = createProgressBar(s.hwnd, idProgressBar, 28, 820, 474, 24)
 	win.SendMessage(s.progressBar, win.PBM_SETRANGE32, 0, 1000)
 	win.SendMessage(s.progressBar, win.PBM_SETBARCOLOR, 0, uintptr(win.RGB(14, 99, 156)))
 	win.SendMessage(s.progressBar, win.PBM_SETBKCOLOR, 0, uintptr(win.RGB(45, 45, 48)))
@@ -601,7 +620,7 @@ func (s *uiState) handleCommand(id uint16) {
 		s.requestSummaryRefresh(false)
 	case idScan:
 		s.requestSummaryRefresh(true)
-	case idEncoderCombo, idBlackModeCombo:
+	case idEncoderCombo, idBlackModeCombo, idTarget70ProCheck, idTargetAce5Check, idTarget90Check:
 		s.requestSummaryRefresh(false)
 	case idOpenOutput:
 		outputDir := strings.TrimSpace(getWindowText(s.outputDirEdit))
@@ -825,10 +844,18 @@ func (s *uiState) readConfig() (appcore.Config, error) {
 		return appcore.Config{}, fmt.Errorf("\u6839\u76ee\u5f55\u8f93\u51fa\u4e0d\u80fd\u4e3a\u7a7a")
 	}
 	cfg := appcore.DefaultConfig(workDir)
+	savedCfg := s.loadSavedConfig(cfg)
 	cfg.WorkDir = workDir
 	cfg.OutputDir = outputDir
 	cfg.FFmpegPath = ffmpegPath
 	cfg.FFprobePath = ffprobePath
+	cfg.BlackLineThreshold = savedCfg.BlackLineThreshold
+	cfg.BlackLineRatioPercent = savedCfg.BlackLineRatioPercent
+	cfg.BlackLineRequiredRun = savedCfg.BlackLineRequiredRun
+	cfg.Targets = s.selectedTargets()
+	if len(cfg.Targets) == 0 {
+		return cfg, fmt.Errorf("\u81f3\u5c11\u9700\u8981\u52fe\u9009\u4e00\u4e2a\u8f93\u51fa\u89c4\u683c")
+	}
 	blur, err := strconv.Atoi(strings.TrimSpace(getWindowText(s.blurEdit)))
 	if err != nil {
 		return cfg, fmt.Errorf("\u80cc\u666f\u6a21\u7cca\u53c2\u6570\u5fc5\u987b\u662f\u6574\u6570")
@@ -905,12 +932,18 @@ func (s *uiState) captureSummarySnapshot() summarySnapshot {
 		ffprobePath: strings.TrimSpace(getWindowText(s.ffprobeEdit)),
 		encoder:     getComboSelection(s.encoderCombo),
 		blackMode:   getComboSelection(s.blackModeCombo),
+		targets:     s.selectedTargets(),
 	}
 }
 
 func buildSummary(snapshot summarySnapshot) string {
 	discoveryCfg := appcore.DefaultConfig(snapshot.workDir)
 	discoveryCfg.OutputDir = snapshot.outputDir
+	if len(snapshot.targets) > 0 {
+		discoveryCfg.Targets = snapshot.targets
+	} else {
+		discoveryCfg.Targets = selectableTargets
+	}
 	videos, videoErr := appcore.DiscoverVideos(discoveryCfg)
 	bins, binErr := ffmpeg.Locate(snapshot.workDir, ffmpeg.Binaries{
 		FFmpeg:  snapshot.ffmpegPath,
@@ -933,8 +966,9 @@ func buildSummary(snapshot summarySnapshot) string {
 		lines = append(lines, "FFprobe: "+bins.FFprobe)
 		lines = append(lines, "\u6765\u6e90: "+bins.Source)
 	}
-	lines = append(lines, "\u6839\u76ee\u5f55\u89c6\u9891\u8f93\u51fa: "+snapshot.outputDir+"\\<\u6bd4\u4f8b\u540d>")
-	lines = append(lines, "\u5b50\u76ee\u5f55\u89c6\u9891\u8f93\u51fa: \u89c6\u9891\u6240\u5728\u76ee\u5f55\\<\u6bd4\u4f8b\u540d>")
+	lines = append(lines, "\u6839\u76ee\u5f55\u89c6\u9891\u8f93\u51fa: "+snapshot.outputDir+"\\<\u89c4\u683c\u540d>")
+	lines = append(lines, "\u5b50\u76ee\u5f55\u89c6\u9891\u8f93\u51fa: \u89c6\u9891\u6240\u5728\u76ee\u5f55\\<\u89c4\u683c\u540d>")
+	lines = append(lines, "\u8f93\u51fa\u89c4\u683c: "+formatTargetLabels(snapshot.targets))
 	lines = append(lines, "\u7f16\u7801\u7b56\u7565: "+snapshot.encoder)
 	lines = append(lines, "\u53bb\u9ed1\u8fb9\u65b9\u5f0f: "+snapshot.blackMode)
 	lines = append(lines, "\u8bf4\u660e: \u5141\u8bb8\u8bfb\u53d6 C:\\ffmpeg\uff0c\u4f46\u4e0d\u4f1a\u628a\u8f93\u51fa\u5199\u5165 C \u76d8\u3002")
@@ -1141,6 +1175,24 @@ func createButton(parent win.HWND, id int, text string, x, y, w, h int32, varian
 	)
 	storeButtonState(hwnd, &buttonState{variant: variant})
 	applyFont(hwnd, globalState.fontNormal)
+	return hwnd
+}
+
+func createCheckbox(parent win.HWND, id int, text string, x, y, w, h int32, checked bool) win.HWND {
+	hwnd := win.CreateWindowEx(
+		0,
+		syscall.StringToUTF16Ptr("BUTTON"),
+		syscall.StringToUTF16Ptr(text),
+		win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_AUTOCHECKBOX,
+		x, y, w, h,
+		parent,
+		win.HMENU(id),
+		0,
+		nil,
+	)
+	applyExplorerTheme(hwnd)
+	applyFont(hwnd, globalState.fontNormal)
+	setCheckboxChecked(hwnd, checked)
 	return hwnd
 }
 
@@ -1392,6 +1444,61 @@ func getComboSelection(hwnd win.HWND) string {
 	return syscall.UTF16ToString(buf)
 }
 
+func checkboxChecked(hwnd win.HWND) bool {
+	return win.SendMessage(hwnd, win.BM_GETCHECK, 0, 0) == win.BST_CHECKED
+}
+
+func setCheckboxChecked(hwnd win.HWND, checked bool) {
+	state := uintptr(win.BST_UNCHECKED)
+	if checked {
+		state = win.BST_CHECKED
+	}
+	win.SendMessage(hwnd, win.BM_SETCHECK, state, 0)
+}
+
+func (s *uiState) selectedTargets() []appcore.Target {
+	targets := make([]appcore.Target, 0, len(selectableTargets))
+	if s == nil || len(s.targetChecks) == 0 {
+		return append(targets, selectableTargets...)
+	}
+	for _, target := range selectableTargets {
+		if checkboxChecked(s.targetChecks[target.Label]) {
+			targets = append(targets, target)
+		}
+	}
+	return targets
+}
+
+func targetSelected(cfg persistedConfig, label string) bool {
+	if len(cfg.SelectedTargets) == 0 {
+		return true
+	}
+	for _, selected := range cfg.SelectedTargets {
+		if strings.EqualFold(selected, label) {
+			return true
+		}
+	}
+	return false
+}
+
+func targetLabels(targets []appcore.Target) []string {
+	labels := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if strings.TrimSpace(target.Label) != "" {
+			labels = append(labels, target.Label)
+		}
+	}
+	return labels
+}
+
+func formatTargetLabels(targets []appcore.Target) string {
+	labels := targetLabels(targets)
+	if len(labels) == 0 {
+		return "\u672a\u52fe\u9009"
+	}
+	return strings.Join(labels, ", ")
+}
+
 func createFont(height int32, weight int32, face string) win.HFONT {
 	var font win.LOGFONT
 	font.LfHeight = height
@@ -1462,6 +1569,7 @@ func (s *uiState) loadSavedConfig(defaultCfg appcore.Config) persistedConfig {
 		BlackLineThreshold:    defaultCfg.BlackLineThreshold,
 		BlackLineRatioPercent: defaultCfg.BlackLineRatioPercent,
 		BlackLineRequiredRun:  defaultCfg.BlackLineRequiredRun,
+		SelectedTargets:       targetLabels(defaultCfg.Targets),
 	}
 	if s == nil || strings.TrimSpace(s.configPath) == "" {
 		return cfg
@@ -1506,6 +1614,9 @@ func (s *uiState) loadSavedConfig(defaultCfg appcore.Config) persistedConfig {
 	}
 	if saved.BlackLineRequiredRun > 0 {
 		cfg.BlackLineRequiredRun = saved.BlackLineRequiredRun
+	}
+	if len(saved.SelectedTargets) > 0 {
+		cfg.SelectedTargets = normalizeSelectedTargets(saved.SelectedTargets)
 	}
 	return cfg
 }
@@ -1566,7 +1677,28 @@ func (s *uiState) capturePersistedConfig() persistedConfig {
 		BlackLineThreshold:    savedCfg.BlackLineThreshold,
 		BlackLineRatioPercent: savedCfg.BlackLineRatioPercent,
 		BlackLineRequiredRun:  savedCfg.BlackLineRequiredRun,
+		SelectedTargets:       targetLabels(s.selectedTargets()),
 	}
+}
+
+func normalizeSelectedTargets(selected []string) []string {
+	known := map[string]string{}
+	for _, target := range selectableTargets {
+		known[strings.ToLower(target.Label)] = target.Label
+	}
+
+	normalized := make([]string, 0, len(selected))
+	seen := map[string]bool{}
+	for _, label := range selected {
+		key := strings.ToLower(strings.TrimSpace(label))
+		canonical, ok := known[key]
+		if !ok || seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		normalized = append(normalized, canonical)
+	}
+	return normalized
 }
 
 func parseIntOrDefault(value string, fallback int) int {

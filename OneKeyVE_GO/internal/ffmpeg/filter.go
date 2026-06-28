@@ -50,11 +50,22 @@ func PlannedDimensions(width int, height int) (rotate bool, normalizedWidth int,
 	return false, width, height
 }
 
-func BuildFilter(rotate bool, width int, height int, crop CropRect, targetHeight int, blurSigma int, featherPx int) string {
+func BuildFilter(rotate bool, width int, height int, crop CropRect, targetWidth int, targetHeight int, blurSigma int, featherPx int) string {
 	sw := Even(width)
 	sh := Even(height)
-	sth := Even(targetHeight)
-	offsetY := (sth - sh) / 2
+	tw := Even(targetWidth)
+	th := Even(targetHeight)
+	if tw <= 0 {
+		tw = sw
+	}
+	if th <= 0 {
+		th = sh
+	}
+	fh := Even(int(float64(sh) * float64(tw) / float64(sw)))
+	if fh <= 0 {
+		fh = sh
+	}
+	offsetY := (th - fh) / 2
 
 	transform := "copy"
 	if rotate {
@@ -69,23 +80,25 @@ func BuildFilter(rotate bool, width int, height int, crop CropRect, targetHeight
 		"[0:v]%s%s,setsar=1[raw];"+
 			"[raw]split=2[bg_src][fg_src];"+
 			"[bg_src]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,gblur=sigma=%d[bg];"+
+			"[fg_src]scale=%d:%d,setsar=1[fg_scaled];"+
 			"color=c=white:s=%dx%d[m_base];"+
 			"[m_base]drawbox=x=0:y=0:w=%d:h=%d:t=fill:c=black,"+
 			"drawbox=x=0:y=%d:w=%d:h=%d:t=fill:c=black,"+
 			"drawbox=x=0:y=0:w=%d:h=%d:t=fill:c=black,"+
 			"drawbox=x=%d:y=0:w=%d:h=%d:t=fill:c=black,"+
 			"boxblur=%d:1,format=gray[mask];"+
-			"[fg_src]format=yuva420p[fg_alpha];"+
+			"[fg_scaled]format=yuva420p[fg_alpha];"+
 			"[fg_alpha][mask]alphamerge[fg_final];"+
 			"[bg][fg_final]overlay=x=0:y=%d:shortest=1:format=auto,format=yuv420p[outv]",
 		prefix,
 		transform,
-		sw, sth, sw, sth, blurSigma,
-		sw, sh,
-		sw, featherPx,
-		sh-featherPx, sw, featherPx,
-		featherPx, sh,
-		sw-featherPx, featherPx, sh,
+		tw, th, tw, th, blurSigma,
+		tw, fh,
+		tw, fh,
+		tw, featherPx,
+		fh-featherPx, tw, featherPx,
+		featherPx, fh,
+		tw-featherPx, featherPx, fh,
 		featherPx,
 		offsetY,
 	)

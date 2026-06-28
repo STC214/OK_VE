@@ -6,7 +6,7 @@
 
 仓库级导航和目录说明见：
 
-- [根目录 README](/f:/Project/OneKey_VE/README.md)
+- [根目录 README](/f:/Project/02_Video_Wallpaper/OneKey_VE/README.md)
 
 当前已经完成：
 
@@ -54,9 +54,10 @@
 - 即使根目录没有视频文件，只要子目录有视频文件也可以正常处理
 - 读取视频宽高和帧数
 - 横屏输入自动转入竖屏处理流程
-- 输出两套目标比例
-- `9x20`
-- `5x11`
+- 输出三套可选规格
+- `70Pro`：原 `9x20` 处理比例
+- `Ace5`：原 `5x11` 处理比例
+- `90`：固定输出 `1156x2510`
 - 背景模糊 + 前景羽化滤镜链
 - 默认使用 `h264_nvenc`
 - 不可用时回退 `libx264`
@@ -64,14 +65,22 @@
 - 如果无法读取输入视频码率，则回退到当前内置编码参数
 - 黑边检测后单次 `crop`
 
+## 输出规格
+
+GUI 中勾选的每个规格都会生成独立渲染任务。程序会对同一个源视频复用一次元信息读取和黑边检测结果，但每个规格都会单独构造 FFmpeg 滤镜链并单独输出文件。
+
+- `70Pro`：原 `9x20` 处理比例，按规范后源视频宽度动态计算输出高度
+- `Ace5`：原 `5x11` 处理比例，按规范后源视频宽度动态计算输出高度
+- `90`：固定输出 `1156x2510`，该分辨率会实际传入滤镜链用于背景画布、前景缩放和最终输出，不只是目录名或显示名
+
 ## 视频发现与输出规则
 
-- 根目录视频输出到“根目录输出”下的 `<比例名>` 目录
-- 子目录视频输出到视频所在目录下的 `<比例名>` 目录
-- 当“根目录输出”和“工作目录”相同时，程序仍会保留正常源视频，只跳过自己生成的比例目录
-- 扫描时会自动跳过程序已生成的根目录输出和子目录比例输出，避免重复处理
-- 如果目标比例目录中已存在同名输出文件，且文件体积不小于原视频，则直接跳过该目标任务
-- 如果目标比例目录中已存在同名输出文件，但文件体积小于原视频，则视为上次处理失败，删除后重新处理
+- 根目录视频输出到“根目录输出”下的 `<规格名>` 目录
+- 子目录视频输出到视频所在目录下的 `<规格名>` 目录
+- 当“根目录输出”和“工作目录”相同时，程序仍会保留正常源视频，只跳过自己生成的规格目录
+- 扫描时会自动跳过程序已生成的根目录输出和子目录规格输出，避免重复处理
+- 如果目标规格目录中已存在同名输出文件，且 `ffprobe` 可正常读取视频流，则直接跳过该目标任务
+- 如果目标规格目录中已存在同名输出文件，但为空或无法通过 `ffprobe` 校验，则视为上次处理失败，删除后重新处理
 
 ## GUI 现状
 
@@ -83,6 +92,7 @@
 - 日志实时刷新，最新日志显示在最上面
 - 处理在后台线程执行，界面不应被主流程直接阻塞
 - 运行中支持暂停、继续和停止当前任务
+- 可勾选需要输出的规格：`70Pro`、`Ace5`、`90`
 - 当前配置会定时自动保存，并在关闭窗口时再做一次最终保存
 
 ## FFmpeg 查找顺序
@@ -200,23 +210,23 @@ GUI 会每 `30` 秒把当前配置自动保存到 EXE 所在目录：
 构建普通版 GUI：
 
 ```powershell
-Set-Location F:\Project\OneKey_VE\OneKeyVE_GO
+Set-Location F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO
 .\pack\build_gui.ps1
 ```
 
 构建完整内嵌版 GUI：
 
 ```powershell
-Set-Location F:\Project\OneKey_VE\OneKeyVE_GO
+Set-Location F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO
 .\pack\build_gui_embedded.ps1
 ```
 
 运行 CLI：
 
 ```powershell
-Set-Location F:\Project\OneKey_VE\OneKeyVE_GO
-$env:ONEKEYVE_WORKDIR = 'F:\Project\OneKey_VE\test'
-$env:ONEKEYVE_OUTPUT = 'F:\Project\OneKey_VE\test\output-go'
+Set-Location F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO
+$env:ONEKEYVE_WORKDIR = 'F:\Project\02_Video_Wallpaper\OneKey_VE\test'
+$env:ONEKEYVE_OUTPUT = 'F:\Project\02_Video_Wallpaper\OneKey_VE\test\output-go'
 $env:ONEKEYVE_FFMPEG = 'C:\ffmpeg\bin\ffmpeg.exe'
 $env:ONEKEYVE_FFPROBE = 'C:\ffmpeg\bin\ffprobe.exe'
 go run .\cmd\onekeyve
@@ -229,15 +239,15 @@ go run .\cmd\onekeyve
 - `go test ./...` 通过
 - 普通版 GUI 可正常启动
 - 完整内嵌版 GUI 可正常启动
-- 已存在且体积不小于原视频的输出会被自动跳过
-- 体积小于原视频的旧输出会被删除后重新处理
+- 已存在且可通过 `ffprobe` 校验的输出会被自动跳过
+- 空文件或无法通过 `ffprobe` 校验的旧输出会被删除后重新处理
 - 子进程已绑定主进程生命周期，异常退出时不会再长期残留孤儿 `ffmpeg`
 - 输出码率已按输入码率的 `1.5` 倍生成
 - 根目录没有视频、仅子目录有视频时可正常发现并处理
 - “根目录输出”和“工作目录”相同时不会再把整个工作目录误判为输出目录
 - 内嵌版运行时日志会显示 `binary source: embedded`
 - 横屏和竖屏样例都已实测
-- `9x20` 和 `5x11` 两套输出均已成功生成
+- `70Pro`、`Ace5` 和 `90` 三套输出均已成功生成
 - 输出写入 `C:` 时会被程序拒绝
 - GUI 中目录选择、文件选择和开始处理都不会弹出控制台窗口
 

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"onekeyvego/internal/ffmpeg"
 )
 
 func TestResolveOutputDirMakesRelativePathWorkdirRelative(t *testing.T) {
@@ -13,6 +15,21 @@ func TestResolveOutputDirMakesRelativePathWorkdirRelative(t *testing.T) {
 	want := filepath.Join(workDir, "output")
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestDefaultTargetsUseUserFacingLabelsAndFixed90Size(t *testing.T) {
+	cfg := DefaultConfig(filepath.Join("F:\\", "videos"))
+	if len(cfg.Targets) != 3 {
+		t.Fatalf("expected 3 default targets, got %d", len(cfg.Targets))
+	}
+	if cfg.Targets[0].Label != "70Pro" || cfg.Targets[1].Label != "Ace5" || cfg.Targets[2].Label != "90" {
+		t.Fatalf("unexpected default targets: %+v", cfg.Targets)
+	}
+
+	width, height := cfg.Targets[2].Dimensions(1080)
+	if width != 1156 || height != 2510 {
+		t.Fatalf("expected 90 target to use 1156x2510, got %dx%d", width, height)
 	}
 }
 
@@ -186,14 +203,60 @@ func TestDiscoverVideosKeepsNestedSourcesWhenOutputDirEqualsWorkDir(t *testing.T
 	}
 }
 
-func TestPlanTargetRendersSkipsExistingOutputsThatAreNotSmallerThanSource(t *testing.T) {
+func TestDiscoverVideosSkipsLegacyGeneratedOutputFoldersAfterRename(t *testing.T) {
+	workDir := t.TempDir()
+	outputDir := filepath.Join(workDir, "output")
+	rootVideo := filepath.Join(workDir, "root.mp4")
+	legacyRendered := filepath.Join(outputDir, "9x20", "root.mp4")
+
+	mustWriteTestFile(t, rootVideo)
+	mustWriteTestFile(t, legacyRendered)
+
+	cfg := DefaultConfig(workDir)
+	cfg.OutputDir = outputDir
+
+	videos, err := DiscoverVideos(cfg)
+	if err != nil {
+		t.Fatalf("DiscoverVideos returned error: %v", err)
+	}
+	if len(videos) != 1 || videos[0] != rootVideo {
+		t.Fatalf("expected only root source video, got %v", videos)
+	}
+}
+
+func TestDiscoverVideosSkipsUnselectedGeneratedOutputFolders(t *testing.T) {
+	workDir := t.TempDir()
+	outputDir := filepath.Join(workDir, "output")
+	rootVideo := filepath.Join(workDir, "root.mp4")
+	unselectedRendered := filepath.Join(outputDir, "Ace5", "root.mp4")
+
+	mustWriteTestFile(t, rootVideo)
+	mustWriteTestFile(t, unselectedRendered)
+
+	cfg := DefaultConfig(workDir)
+	cfg.OutputDir = outputDir
+	cfg.Targets = []Target{
+		{Label: "70Pro", Ratio: 9.0 / 20.0, Aliases: []string{"9x20"}},
+	}
+
+	videos, err := DiscoverVideos(cfg)
+	if err != nil {
+		t.Fatalf("DiscoverVideos returned error: %v", err)
+	}
+	if len(videos) != 1 || videos[0] != rootVideo {
+		t.Fatalf("expected only root source video, got %v", videos)
+	}
+}
+
+func TestPlanTargetRendersSkipsExistingOutputsThatPassProbeValidation(t *testing.T) {
 	workDir := t.TempDir()
 	outputDir := filepath.Join(workDir, "output")
 	videoPath := filepath.Join(workDir, "clip.mp4")
 	existingOutput := filepath.Join(outputDir, "9x20", "clip.mp4")
+	fakeFFprobe := writeFakeFFprobe(t, true)
 
 	mustWriteSizedTestFile(t, videoPath, 10)
-	mustWriteSizedTestFile(t, existingOutput, 10)
+	mustWriteSizedTestFile(t, existingOutput, 5)
 
 	cfg := Config{
 		WorkDir:   workDir,
@@ -204,7 +267,7 @@ func TestPlanTargetRendersSkipsExistingOutputsThatAreNotSmallerThanSource(t *tes
 		},
 	}
 
-	plans, err := planTargetRenders(cfg, videoPath)
+	plans, err := planTargetRenders(cfg, ffmpeg.Binaries{FFprobe: fakeFFprobe}, videoPath, nil)
 	if err != nil {
 		t.Fatalf("planTargetRenders returned error: %v", err)
 	}
@@ -212,24 +275,25 @@ func TestPlanTargetRendersSkipsExistingOutputsThatAreNotSmallerThanSource(t *tes
 		t.Fatalf("expected 2 plans, got %d", len(plans))
 	}
 	if !plans[0].SkipExisting {
-		t.Fatalf("expected first target to be skipped when output is not smaller")
+		t.Fatalf("expected first target to be skipped when existing output probes successfully")
 	}
 	if plans[0].RemovedFailedExisting {
-		t.Fatalf("did not expect skipped output to be deleted")
+		t.Fatalf("did not expect valid output to be deleted")
 	}
 	if plans[1].SkipExisting {
 		t.Fatalf("did not expect missing target output to be skipped")
 	}
 }
 
-func TestPlanTargetRendersDeletesSmallerFailedOutput(t *testing.T) {
+func TestPlanTargetRendersDeletesInvalidExistingOutput(t *testing.T) {
 	workDir := t.TempDir()
 	outputDir := filepath.Join(workDir, "output")
 	videoPath := filepath.Join(workDir, "clip.mp4")
 	failedOutput := filepath.Join(outputDir, "9x20", "clip.mp4")
+	fakeFFprobe := writeFakeFFprobe(t, false)
 
 	mustWriteSizedTestFile(t, videoPath, 10)
-	mustWriteSizedTestFile(t, failedOutput, 5)
+	mustWriteSizedTestFile(t, failedOutput, 20)
 
 	cfg := Config{
 		WorkDir:   workDir,
@@ -239,7 +303,7 @@ func TestPlanTargetRendersDeletesSmallerFailedOutput(t *testing.T) {
 		},
 	}
 
-	plans, err := planTargetRenders(cfg, videoPath)
+	plans, err := planTargetRenders(cfg, ffmpeg.Binaries{FFprobe: fakeFFprobe}, videoPath, nil)
 	if err != nil {
 		t.Fatalf("planTargetRenders returned error: %v", err)
 	}
@@ -247,13 +311,32 @@ func TestPlanTargetRendersDeletesSmallerFailedOutput(t *testing.T) {
 		t.Fatalf("expected 1 plan, got %d", len(plans))
 	}
 	if plans[0].SkipExisting {
-		t.Fatalf("expected smaller output to be re-rendered")
+		t.Fatalf("expected invalid output to be re-rendered")
 	}
 	if !plans[0].RemovedFailedExisting {
-		t.Fatalf("expected smaller output to be deleted before re-render")
+		t.Fatalf("expected invalid output to be deleted before re-render")
 	}
 	if _, err := os.Stat(failedOutput); !os.IsNotExist(err) {
-		t.Fatalf("expected smaller failed output to be removed, got err=%v", err)
+		t.Fatalf("expected invalid output to be removed, got err=%v", err)
+	}
+}
+
+func TestPlanTargetRendersRejectsActualCDriveOutputDirectories(t *testing.T) {
+	workDir := t.TempDir()
+	videoPath := filepath.Join(workDir, "clip.mp4")
+	mustWriteTestFile(t, videoPath)
+
+	cfg := Config{
+		WorkDir:   workDir,
+		OutputDir: filepath.Join("C:\\", "renders"),
+		Targets: []Target{
+			{Label: "9x20"},
+		},
+	}
+
+	_, err := planTargetRenders(cfg, ffmpeg.Binaries{}, videoPath, nil)
+	if err == nil || !strings.Contains(err.Error(), "refusing to write output under C drive") {
+		t.Fatalf("expected C drive output rejection, got %v", err)
 	}
 }
 
@@ -313,4 +396,21 @@ func mustWriteSizedTestFile(t *testing.T, path string, size int) {
 	if err := os.WriteFile(path, make([]byte, size), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeFakeFFprobe(t *testing.T, valid bool) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffprobe.cmd")
+	body := "@echo off\r\n"
+	if valid {
+		body += "echo {\"streams\":[{\"width\":720,\"height\":1280,\"nb_read_frames\":\"10\",\"bit_rate\":\"1000\"}],\"format\":{\"bit_rate\":\"1000\"}}\r\n"
+		body += "exit /b 0\r\n"
+	} else {
+		body += "echo invalid probe >&2\r\n"
+		body += "exit /b 1\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake ffprobe: %v", err)
+	}
+	return path
 }

@@ -16,7 +16,7 @@
 
 Go 版本位置：
 
-- `F:\Project\OneKey_VE\OneKeyVE_GO`
+- `F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO`
 
 运行约束仍然一致：
 
