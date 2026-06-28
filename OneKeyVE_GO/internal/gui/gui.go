@@ -24,9 +24,11 @@ import (
 
 const (
 	windowClassName = "OneKeyVEWindow"
-	windowTitle     = "OneKeyVE"
+	windowTitleBase = "OneKeyVE"
 	buttonClassName = "OneKeyVEButton"
 )
+
+var BuildVersion = ""
 
 const (
 	idWorkDirEdit = 1001 + iota
@@ -235,7 +237,7 @@ func Run() error {
 	hwnd := win.CreateWindowEx(
 		0,
 		syscall.StringToUTF16Ptr(windowClassName),
-		syscall.StringToUTF16Ptr(windowTitle),
+		syscall.StringToUTF16Ptr(windowTitle()),
 		win.WS_OVERLAPPED|win.WS_CAPTION|win.WS_SYSMENU|win.WS_MINIMIZEBOX,
 		win.CW_USEDEFAULT,
 		win.CW_USEDEFAULT,
@@ -277,6 +279,14 @@ func Run() error {
 	}
 
 	return nil
+}
+
+func windowTitle() string {
+	version := strings.TrimSpace(BuildVersion)
+	if version == "" {
+		return windowTitleBase
+	}
+	return windowTitleBase + " " + version
 }
 
 func newUIState() *uiState {

@@ -21,8 +21,10 @@
 
 当前产物：
 
-- `bin/OneKeyVE.exe`
-- `bin/OneKeyVE-embedded.exe`
+- `F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE.exe`
+- `F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE-embedded.exe`
+
+构建脚本会把版本信息写入 EXE 的 Windows 资源，并显示在 GUI 标题栏。版本号使用构建时间戳 `yyyyMMddHHmmss`，文件名保持固定；可在右键 EXE 的“属性” -> “详细信息”中查看 `FileVersion` / `ProductVersion`。
 
 ## 约束
 
@@ -214,12 +216,16 @@ Set-Location F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO
 .\pack\build_gui.ps1
 ```
 
+输出的 `bin/OneKeyVE.exe` 会带有构建时间戳版本信息，GUI 标题栏也会显示该版本。
+
 构建完整内嵌版 GUI：
 
 ```powershell
 Set-Location F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO
 .\pack\build_gui_embedded.ps1
 ```
+
+输出的 `bin/OneKeyVE-embedded.exe` 会带有构建时间戳版本信息，GUI 标题栏也会显示该版本。
 
 运行 CLI：
 

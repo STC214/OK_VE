@@ -10,6 +10,10 @@ $env:GOCACHE = (Resolve-Path ".gocache").Path
 $env:GOMODCACHE = (Resolve-Path ".gomodcache").Path
 
 $iconPath = Join-Path $root "assets\app.ico"
+$versionSyso = Join-Path $root "cmd\onekeyve-gui\version_windows.syso"
+$buildMutex = [System.Threading.Mutex]::new($false, "Global\OneKeyVEGoBuildVersionResource")
+$buildMutexAcquired = $false
+$versionTimestamp = ""
 if (-not (Test-Path $iconPath)) {
   & (Join-Path $PSScriptRoot "convert_image_icon.ps1") -OutputIcon $iconPath
 }
@@ -32,13 +36,29 @@ foreach ($file in $runtimeFiles) {
 }
 
 try {
+  [void]$buildMutex.WaitOne()
+  $buildMutexAcquired = $true
+  $versionTimestamp = Get-Date -Format "yyyyMMddHHmmss"
+
+  & (Join-Path $PSScriptRoot "build_version_resource.ps1") `
+    -OutputSyso $versionSyso `
+    -Timestamp $versionTimestamp `
+    -ProductName "OneKeyVE" `
+    -FileDescription "OneKeyVE Embedded" `
+    -OriginalFilename "OneKeyVE-embedded.exe"
+
   go build `
     -tags bundled_ffmpeg `
     -trimpath `
-    -ldflags "-H windowsgui -s -w" `
+    -ldflags "-H windowsgui -s -w -X onekeyvego/internal/gui.BuildVersion=$versionTimestamp" `
     -o ".\bin\OneKeyVE-embedded.exe" `
     .\cmd\onekeyve-gui
 } finally {
+  Remove-Item -LiteralPath $versionSyso -Force -ErrorAction SilentlyContinue
+  if ($buildMutexAcquired) {
+    $buildMutex.ReleaseMutex()
+  }
+  $buildMutex.Dispose()
   Get-ChildItem $embeddedDir -File | Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
@@ -47,3 +67,4 @@ if (Test-Path $iconPath) {
 }
 
 & (Join-Path $PSScriptRoot "refresh_shell_icons.ps1")
+Write-Host "Built OneKeyVE-embedded.exe version $versionTimestamp"

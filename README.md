@@ -35,6 +35,8 @@ F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE-embedded.exe
 - 默认会把输出视频码率控制为输入视频码率的 `1.5` 倍
 - 如果输入视频码率无法读取，则回退到程序内置编码参数
 - GUI 可勾选需要输出的规格：`70Pro`、`Ace5`、`90`
+- 成品 EXE 会写入 Windows 版本信息，版本号为构建时间戳 `yyyyMMddHHmmss`
+- GUI 标题栏也会显示同一个时间戳版本号
 
 ## 使用说明
 
@@ -53,6 +55,13 @@ F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE-embedded.exe
 4. 如果使用普通版 `OneKeyVE.exe`，且程序没有自动找到 FFmpeg / FFprobe，再手动指定它们的路径
 5. 按需选择编码器、去黑边模式、输出规格和其他处理参数
 6. 点击开始处理，等待日志和进度条完成
+
+成品 EXE 的文件名保持固定，不把版本号写进文件名。版本号会显示在 GUI 标题栏，并写在 Windows EXE 资源里。右键 EXE，打开“属性”中的“详细信息”，可以看到 `FileVersion` / `ProductVersion` 为构建时间戳版本。
+
+当前构建产物位置：
+
+- 普通版：`F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE.exe`
+- 完整内嵌版：`F:\Project\02_Video_Wallpaper\OneKey_VE\OneKeyVE_GO\bin\OneKeyVE-embedded.exe`
 
 运行中支持：
 
